@@ -41,9 +41,9 @@ fi
 cp /app/config.ini /config/config.ini
 
 # --- 3. MediaMTX Config Generation ---
-if [ ! -f "/config/mediamtx.yml" ]; then
-  echo "Generating default mediamtx.yml in /config..."
-  cat <<EOF > /config/mediamtx.yml
+# We always generate this in /tmp so it's ephemeral and stays up-to-date with image updates
+echo "Generating ephemeral mediamtx.yml in /tmp..."
+cat <<EOF > /tmp/mediamtx.yml
 paths:
   comma_dashcam:
     runOnInit: ffmpeg -loglevel error -re -i /dev/shm/new_clip.fifo -c:v libx264 -f mpegts udp://238.0.0.1:1234?pkt_size=1316
@@ -54,7 +54,6 @@ rtmpAddress: :1935
 hlsAddress: :8888
 webrtcAddress: :8889
 EOF
-fi
 
 # --- 4. Database Initialization ---
 if [ ! -f "/config/comma_downloads.db" ]; then
@@ -64,7 +63,7 @@ fi
 
 # --- 5. Start Processes ---
 echo "Starting MediaMTX..."
-/usr/local/bin/mediamtx /config/mediamtx.yml &
+/usr/local/bin/mediamtx /tmp/mediamtx.yml &
 MEDIAMTX_PID=$!
 
 sleep 2
