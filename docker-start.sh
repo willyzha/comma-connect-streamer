@@ -46,7 +46,7 @@ if [ ! -f "/config/mediamtx.yml" ]; then
   cat <<EOF > /config/mediamtx.yml
 paths:
   comma_dashcam:
-    runOnInit: ffmpeg -re -i /dev/shm/new_clip.fifo -c copy -f rtsp rtsp://localhost:8554/comma_dashcam
+    runOnInit: ffmpeg -loglevel error -re -i /dev/shm/new_clip.fifo -c:v libx264 -preset superfast -f rtsp rtsp://localhost:8554/comma_dashcam
     runOnInitRestart: yes
 rtspAddress: :8554
 rtmpAddress: :1935
