@@ -11,7 +11,7 @@ paths:
     # -re ensures it reads at a real-time rate
     # -f mpegts specifies the input format from fifo_streamer.py
     # -c copy avoids transcoding
-    runOnInit: ffmpeg -re -i /dev/shm/new_clip.fifo -c copy -f rtsp rtsp://localhost:8554/comma_dashcam
+    runOnInit: ffmpeg -loglevel error -re -i /dev/shm/new_clip.fifo -c copy -f rtsp rtsp://localhost:8554/comma_dashcam
     runOnInitRestart: yes
 
 # Allow connections from any IP

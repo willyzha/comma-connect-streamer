@@ -79,6 +79,7 @@ def WriteTextVideo(input_video: str, output_video: str, timestamp: str, segment:
 
   cmd = [
     FFMPEG_PATH,
+    "-loglevel", "error",
     "-y",
     "-i",
     input_video, 
