@@ -28,11 +28,10 @@ COPY . .
 # Set environment variables for config.ini defaults
 ENV FFMPEG_PATH=/usr/bin/ffmpeg
 ENV DOWNLOAD_PATH=/data
-ENV DATABASE_PATH=/app/comma_downloads.db
 ENV FIFO_PATH=/dev/shm/new_clip.fifo
 
-# Create data directory
-RUN mkdir -p /data/dashcam/clips
+# Create necessary directories
+RUN mkdir -p /data/dashcam/clips /config
 
 # Expose ports for MediaMTX
 EXPOSE 8554 1935 8888 8889

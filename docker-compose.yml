@@ -15,5 +15,5 @@ services:
       - DISABLE_COMMA=false
     volumes:
       - ./data:/data
-      - ./comma_downloads.db:/app/comma_downloads.db
+      - ./config:/config
     shm_size: '256mb' # Needed for FIFOs in /dev/shm
