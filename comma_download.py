@@ -77,6 +77,37 @@ logger = logging.getLogger('downloader')
 
 epoch = datetime.fromtimestamp(0, timezone.utc)
 
+# Configure a global requests session for connection pooling and retries
+api_session = requests.Session()
+retries = Retry(total=HTTP_REQUEST_RETRIES,
+                backoff_factor=1,
+                status_forcelist=[ 500, 502, 503, 504 ])
+api_session.mount('https://', HTTPAdapter(max_retries=retries))
+
+def make_api_request(url):
+    """Makes an authenticated GET request to the Comma API with robust error handling."""
+    try:
+        response = api_session.get(url, headers={'Authorization': JWT_KEY}, timeout=30)
+        response.raise_for_status()
+        return response.json()
+    except requests.exceptions.HTTPError as e:
+        status_code = e.response.status_code
+        if status_code == 401:
+            logger.error("AUTHENTICATION ERROR: Your JWT token is expired or invalid. Please check your COMMA_JWT_KEY.")
+        elif status_code == 403:
+            logger.error(f"PERMISSION ERROR: Access forbidden (403). Check if Dongle ID {DONGLE_ID} is correct and accessible with your token.")
+        elif status_code == 404:
+            logger.error(f"NOT FOUND: The requested resource was not found (404). URL: {url}")
+        else:
+            logger.error(f"HTTP error {status_code} occurred: {e}")
+        raise
+    except requests.exceptions.Timeout:
+        logger.error(f"TIMEOUT: The request to {url} timed out.")
+        raise
+    except requests.exceptions.RequestException as e:
+        logger.error(f"NETWORK ERROR: A connection error occurred: {e}")
+        raise
+
 
 @dataclass
 class Segment:
@@ -194,23 +225,6 @@ class CommaDatabase:
 def unix_time_millis(dt):
   return round((dt - epoch).total_seconds() * 1000.0)
 
-def GetAvailableSegments():
-
-  s = requests.Session()
-  retries = Retry(total=HTTP_REQUEST_RETRIES,
-                  backoff_factor=1,
-                  status_forcelist=[ 500, 502, 503, 504 ])
-  s.mount('https://', HTTPAdapter(max_retries=retries))
-
-  millis = unix_time_millis(datetime.now())
-  url = f"https://api.commadotai.com/v1/devices/{DONGLE_ID}/routes_segments?start=0&end={millis}"
-  response = s.get(url, headers={'Authorization': JWT_KEY})
-
-  fullnames = []
-  for route_segment in response.json():
-    fullnames.append(route_segment['fullname'])
-  return fullnames
-
 def GetSegments(start_time=None, end_time=None, check_db=CHECK_DATABASE, db_instance=None):
   start_millis = 0
   if start_time is not None:
@@ -222,20 +236,19 @@ def GetSegments(start_time=None, end_time=None, check_db=CHECK_DATABASE, db_inst
 
   logger.debug(f"Searching for segments from {start_millis} to {end_millis}...")
 
-  s = requests.Session()
-  retries = Retry(total=HTTP_REQUEST_RETRIES,
-                  backoff_factor=1,
-                  status_forcelist=[ 500, 502, 503, 504 ])
-  s.mount('https://', HTTPAdapter(max_retries=retries))
-
   url = f"https://api.commadotai.com/v1/devices/{DONGLE_ID}/routes_segments?start={start_millis}&end={end_millis}"
-  response = s.get(url, headers={'Authorization': JWT_KEY})
+  
+  try:
+    routes_data = make_api_request(url)
+  except Exception:
+    # Error logged by make_api_request
+    return []
 
   segments = []
   db = db_instance if db_instance else CommaDatabase()
   
   try:
-    for route in response.json():
+    for route in routes_data:
       route_name = route['fullname']
       
       # Find which specific segments in this route are missing from DB
@@ -278,17 +291,15 @@ def GetSegments(start_time=None, end_time=None, check_db=CHECK_DATABASE, db_inst
   return sorted(segments, key=lambda x: x.start_time)
 
 def GetSegmentDownloadUrls(route_fullname):
-  s = requests.Session()
-  retries = Retry(total=HTTP_REQUEST_RETRIES,
-                  backoff_factor=1,
-                  status_forcelist=[ 500, 502, 503, 504 ])
-  s.mount('https://', HTTPAdapter(max_retries=retries))
-
   url = f"https://api.commadotai.com/v1/route/{route_fullname}/files"
-  response = s.get(url, headers={'Authorization': JWT_KEY})
+  
+  try:
+    files_data = make_api_request(url)
+  except Exception:
+    return {}
 
   urls = {}
-  for download_url in response.json()['qcameras']:
+  for download_url in files_data.get('qcameras', []):
     logger.debug(f"Found qcamera URL: {download_url}")
     
     match = re.search(r'--(\d+)--qcamera.ts', download_url)
@@ -308,9 +319,28 @@ def DownloadSegment(segment):
     filename = filename.replace(char, '')
 
   logger.info(f"Downloading segment: {filename}")
-  dir = path.join(DOWNLOAD_PATH, filename)
-  urllib.request.urlretrieve(segment.download_url, dir)
-  return dir
+  dest_path = path.join(DOWNLOAD_PATH, filename)
+  
+  try:
+    # Use the session for downloads to benefit from retries and connection pooling.
+    # Comma download URLs are typically pre-signed and don't require the Authorization header,
+    # but the session will handle it if it's there (or we could strip it).
+    response = api_session.get(segment.download_url, stream=True, timeout=60)
+    response.raise_for_status()
+    
+    with open(dest_path, 'wb') as f:
+        for chunk in response.iter_content(chunk_size=8192):
+            if chunk:
+                f.write(chunk)
+    return dest_path
+  except Exception as e:
+    logger.error(f"Failed to download segment {filename}: {e}")
+    if path.exists(dest_path):
+        try:
+            os.remove(dest_path)
+        except Exception:
+            pass
+    return None
 
 def main():
   db = None
@@ -336,32 +366,41 @@ def main():
     sleep_s = 30
 
     while fifo.Alive():
-      get_segment_time = datetime.now(UTC)
-      new_segments = GetSegments(start_time, end_time, db_instance=db)
-      
-      # Process segments in order
-      for segment in new_segments:
-        # Check again just in case a race condition or crash happened
-        if db.segment_exists(segment):
-          continue
-          
-        latest_segment_time = datetime.now(UTC)
-        clip = DownloadSegment(segment)
-        fifo.AddClip(segment, clip, None)
-        db.add_segment(segment)
+      try:
+        get_segment_time = datetime.now(UTC)
+        new_segments = GetSegments(start_time, end_time, db_instance=db)
         
-        if datetime.now(UTC) - get_segment_time > timedelta(minutes=45):
-          logger.warning(f"Processing loop has been running for 45 minutes, breaking to refresh segment list.")
-          break
+        # Process segments in order
+        for segment in new_segments:
+          # Check again just in case a race condition or crash happened
+          if db.segment_exists(segment):
+            continue
+            
+          latest_segment_time = datetime.now(UTC)
+          clip = DownloadSegment(segment)
+          if clip is None:
+              logger.warning(f"Skipping segment {segment.unique_name()} due to download failure.")
+              continue
+              
+          fifo.AddClip(segment, clip, None)
+          db.add_segment(segment)
+          
+          if datetime.now(UTC) - get_segment_time > timedelta(minutes=45):
+            logger.warning(f"Processing loop has been running for 45 minutes, breaking to refresh segment list.")
+            break
 
-      # If it's been more than 10min since the last new segment reduce the polling freq to 5min
-      if datetime.now(UTC) - latest_segment_time > timedelta(minutes=10):
-        logger.debug("No new segments found in 10 minutes. Lowering polling frequency to 5 minutes.")
-        sleep_s = 60 * 5
-        db.cleanup()
-      else:
-        sleep_s = 30
-
+        # If it's been more than 10min since the last new segment reduce the polling freq to 5min
+        if datetime.now(UTC) - latest_segment_time > timedelta(minutes=10):
+          logger.debug("No new segments found in 10 minutes. Lowering polling frequency to 5 minutes.")
+          sleep_s = 60 * 5
+          db.cleanup()
+        else:
+          sleep_s = 30
+      except Exception as e:
+        logger.error(f"Error in polling loop: {e}")
+        # traceback.print_exc() # Keep logging but don't exit
+        sleep_s = 30 # Default sleep on error
+        
       time.sleep(sleep_s)
       end_time = datetime.now(UTC) - END_TIMEDELTA
       start_time = end_time - TIME_RANGE
