@@ -218,7 +218,7 @@ def GetSegments(start_time=None, end_time=None, check_db=CHECK_DATABASE, db_inst
   if end_time is not None:
     end_millis = unix_time_millis(end_time)
 
-  logging.debug(f"Searching for segments from {start_millis} to {end_millis}...")
+  logger.debug(f"Searching for segments from {start_millis} to {end_millis}...")
 
   s = requests.Session()
   retries = Retry(total=HTTP_REQUEST_RETRIES,
@@ -230,50 +230,49 @@ def GetSegments(start_time=None, end_time=None, check_db=CHECK_DATABASE, db_inst
   response = s.get(url, headers={'Authorization': JWT_KEY})
 
   segments = []
-  for route in response.json():
-    route_name = route['fullname']
-
-    if check_db:
-      # Use provided db_instance or create a temporary one (not recommended for performance)
-      db = db_instance if db_instance else CommaDatabase()
-      all_segments_exist = True
-      for i in route['segment_numbers']:
-        s = Segment(route_name, i, -1, -1, "")
-        if not db.segment_exists(s):
-          all_segments_exist = False
-      
-      if not db_instance: # Close if we created a temp one
-          db.close()
-
-      if all_segments_exist:
-        logging.debug(f"All {route_name} segments already exist in DB. Skipping.")
-        continue
-    logging.debug(f"Getting download URLs for route {route_name}")
-    download_urls = GetSegmentDownloadUrls(route_name)
-
-    if len(download_urls.keys()) == 0:
-      logging.warning(f"Got no URLs for route {route_name} when expected {len(route['segment_numbers'])}. Skipping route.")
-      continue
-    if len(download_urls.keys()) != len(route['segment_numbers']):
-      logging.warning(f"Got an incorrect number of URLs for {route_name}, expected {len(route['segment_numbers'])}, got {len(download_urls)}")
-      # return segments
-
-    for i in route['segment_numbers']:
-      if i in download_urls.keys():
-        segment_start_time = route['segment_start_times'][i]
-        segment_end_time = route['segment_end_times'][i]
-
-        if segment_end_time > end_millis:
-          continue
-
-        segments.append(
-          Segment(route_name,
-                  i,
-                  segment_start_time,
-                  segment_end_time,
-                  download_urls[i]))
+  db = db_instance if db_instance else CommaDatabase()
   
-  logging.info(f"Found {len(segments)} new segments between {start_millis} and {end_millis}.")
+  try:
+    for route in response.json():
+      route_name = route['fullname']
+      
+      # Find which specific segments in this route are missing from DB
+      new_segment_indices = []
+      for i in route['segment_numbers']:
+        s_check = Segment(route_name, i, -1, -1, "")
+        if not db.segment_exists(s_check):
+          new_segment_indices.append(i)
+      
+      if not new_segment_indices:
+        logger.debug(f"All segments for route {route_name} already exist in DB. Skipping.")
+        continue
+
+      logger.debug(f"Found {len(new_segment_indices)} new segments in route {route_name}. Getting URLs...")
+      download_urls = GetSegmentDownloadUrls(route_name)
+
+      for i in new_segment_indices:
+        if i in download_urls.keys():
+          segment_start_time = route['segment_start_times'][i]
+          segment_end_time = route['segment_end_times'][i]
+
+          if segment_end_time > end_millis:
+            continue
+
+          segments.append(
+            Segment(route_name,
+                    i,
+                    segment_start_time,
+                    segment_end_time,
+                    download_urls[i]))
+  finally:
+    if not db_instance:
+      db.close()
+  
+  if len(segments) > 0:
+    logger.info(f"Found {len(segments)} new segments between {start_millis} and {end_millis}.")
+  else:
+    logger.debug(f"No new segments found (Poll range: {start_millis} - {end_millis}).")
+
   return sorted(segments, key=lambda x: x.start_time)
 
 def GetSegmentDownloadUrls(route_fullname):
@@ -335,33 +334,27 @@ def main():
     sleep_s = 30
 
     while fifo.Alive():
-      #segments = GetSegments(start_time, end_time)
-      
-      unprocessed_segments = queue.LifoQueue()
-
       get_segment_time = datetime.now(UTC)
-      for segment in reversed(GetSegments(start_time, end_time, db_instance=db)):
-        if STOP_AT_FIRST_PROCESSED and db.segment_exists(segment):
-          break
-        unprocessed_segments.put(segment)
-
-      #for segment in iter(unprocessed_segments.get):
-      while not unprocessed_segments.empty():
-        segment = unprocessed_segments.get()
+      new_segments = GetSegments(start_time, end_time, db_instance=db)
+      
+      # Process segments in order
+      for segment in new_segments:
+        # Check again just in case a race condition or crash happened
         if db.segment_exists(segment):
-          logging.debug(f"Segment {segment.unique_name()} already exists in DB, skipping.")
           continue
+          
         latest_segment_time = datetime.now(UTC)
         clip = DownloadSegment(segment)
         fifo.AddClip(segment, clip, None)
         db.add_segment(segment)
+        
         if datetime.now(UTC) - get_segment_time > timedelta(minutes=45):
-          logging.warning(f"Segment retrieval loop has been running for 45 minutes, breaking to refresh.")
+          logger.warning(f"Processing loop has been running for 45 minutes, breaking to refresh segment list.")
           break
 
       # If it's been more than 10min since the last new segment reduce the polling freq to 5min
       if datetime.now(UTC) - latest_segment_time > timedelta(minutes=10):
-        logging.info("No new segments found in 10 minutes. Lowering polling frequency to 5 minutes.")
+        logger.info("No new segments found in 10 minutes. Lowering polling frequency to 5 minutes.")
         sleep_s = 60 * 5
         db.cleanup()
       else:
