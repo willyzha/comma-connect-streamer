@@ -29,6 +29,7 @@ config.read(config_path)
 
 # CONFIGS from config.ini
 DONGLE_ID = config.get('COMMA', 'DONGLE_ID')
+WRITE_TIMESTAMPS = config.get('COMMA', 'DONGLE_ID')
 WRITE_TIMESTAMPS = config.getboolean('COMMA', 'WRITE_TIMESTAMPS')
 DELETE_CLIPS = config.getboolean('COMMA', 'DELETE_CLIPS')
 LOG_LEVEL = getattr(logging, config.get('COMMA', 'LOG_LEVEL'))
@@ -85,12 +86,17 @@ def WriteTextVideo(input_video: str, output_video: str, timestamp: str, segment:
     input_video, 
     "-vf",
     f"[in]{drawtext_timestamp},{drawtext_segment}[out]",
-    "-vcodec", "libx264",
-    "-preset", "veryfast",
-    "-crf", "23",
-    "-pix_fmt", "yuv420p",
-    "-g", "50",
+    "-vcodec", "mpeg2video",
+    "-b:v", "11000k",
+    "-maxrate", "11000k",
+    "-minrate", "11000k",
+    "-r", "50",
+    "-top", "1",
+#    "-crf", "18",
+#    "-qscale:v", "0",
     "-acodec", "copy",
+    "-pix_fmt", "yuv422p",
+    "-vtag", "xd5c",
     output_video]
   subprocess.call(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.STDOUT)
 #  subprocess.call(cmd)
