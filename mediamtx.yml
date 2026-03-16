@@ -7,12 +7,11 @@
 
 paths:
   comma_dashcam:
-    # Use ffmpeg to read from the FIFO and transcode to H.264
-    # -re ensures it reads at a real-time rate
-    # -c:v libx264 ensures modern compatibility (Frigate)
-    # -preset superfast reduces CPU load
-    runOnInit: ffmpeg -loglevel error -re -i /dev/shm/new_clip.fifo -c:v libx264 -preset superfast -f rtsp rtsp://localhost:8554/comma_dashcam
+    # Read from FIFO and push to UDP multicast as H.264 MPEG-TS
+    runOnInit: ffmpeg -loglevel error -re -i /dev/shm/new_clip.fifo -c:v libx264 -f mpegts udp://238.0.0.1:1234?pkt_size=1316
     runOnInitRestart: yes
+    # MediaMTX consumes the stream from that same UDP address
+    source: udp://238.0.0.1:1234
 
 # Allow connections from any IP
 rtspAddress: :8554
