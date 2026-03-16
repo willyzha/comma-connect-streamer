@@ -1,10 +1,9 @@
 #!/bin/bash
 
 # --- 1. Directory Setup ---
-# Create config and data directories if they don't exist
+# Create config and RAM data directories if they don't exist
 mkdir -p /config
-mkdir -p /data/dashcam/clips
-mkdir -p /dev/shm
+mkdir -p /dev/shm/dashcam/clips
 
 # --- 2. Configuration Setup ---
 # We prioritize config.ini in the mounted /config directory.
