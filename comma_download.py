@@ -63,9 +63,12 @@ FONT_PATH = get_config('FONT_PATH', '/usr/share/fonts/roboto/Roboto-Thin.ttf')
 LOADING_PATH = get_config('LOADING_PATH', '/app/loading.ts')
 OFFLINE_PATH = get_config('OFFLINE_PATH', '/app/offline.ts')
 
+# Helper to get logger
+logger = logging.getLogger('downloader')
+
 epoch = datetime.fromtimestamp(0, timezone.utc)
 logging.basicConfig(
-  format='[%(asctime)s] [COMMA] %(message)s',
+  format='[%(asctime)s] [%(name)s] %(message)s',
   datefmt='%m/%d/%Y %I:%M:%S %p',
   level=LOG_LEVEL,
   handlers=[

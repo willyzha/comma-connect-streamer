@@ -6,8 +6,11 @@ from os import path
 from dataclasses import dataclass
 import time
 import sys
-import pathlib # Added this import
-from datetime import datetime # Added this import
+import pathlib
+from datetime import datetime
+
+# Named logger for the streamer
+logger = logging.getLogger('streamer')
 
 # Define a default Segment dataclass for type hinting in the generic ClipsFifo,
 # though specific applications can pass their own.
@@ -58,6 +61,7 @@ class ClipsFifo:
 
   def AddClip(self, segment, clip_file: str, callback=None):
     # Queue the file path immediately. Processing and reading happens in the background.
+    logger.debug(f"Adding clip to setup queue: {clip_file}")
     self.__setup_fifo.put((segment, clip_file, callback), timeout=120)
 
   def __ProcessSetup(self):
@@ -67,7 +71,7 @@ class ClipsFifo:
       except queue.Empty:
         continue
 
-      logging.debug(f"__ProcessSetup: processing {clip_file}")
+      logger.debug(f"__ProcessSetup: processing {clip_file}")
 
       final_clip_file = clip_file
 
@@ -90,10 +94,10 @@ class ClipsFifo:
                     if os.path.exists(clip_file):
                         os.remove(clip_file)
                 except OSError as e:
-                    logging.error(f"Error removing original clip {clip_file}: {e}")
+                    logger.error(f"Error removing original clip {clip_file}: {e}")
           
           except Exception as e:
-            logging.error(f"Error applying timestamps to {clip_file}: {e}")
+            logger.error(f"Error applying timestamps to {clip_file}: {e}")
             final_clip_file = clip_file # Fallback to original
 
       # Read file into RAM (Preserving User Preference)
@@ -102,21 +106,22 @@ class ClipsFifo:
           with open(final_clip_file, "rb") as fp:
              clip_bytes = fp.read()
       except Exception as e:
-          logging.error(f"Error reading clip {final_clip_file}: {e}")
+          logger.error(f"Error reading clip {final_clip_file}: {e}")
           self.__setup_fifo.task_done()
           continue
 
-      logging.debug(f"__ProcessSetup: len(clip_bytes) {len(clip_bytes)}")
+      logger.debug(f"__ProcessSetup: loaded {len(clip_bytes)} bytes")
 
       # If FIFO queue is empty throw in a loading screen first
       if self.__fifo.empty() and self.__loading_clip_path:
         try:
           with open(self.__loading_clip_path, "rb") as fp:
+            logger.debug("Queueing loading clip bridge")
             self.__fifo.put((None, self.__loading_clip_path, fp.read(), None), timeout=120)
         except FileNotFoundError:
-          logging.warning(f"Loading clip not found at {self.__loading_clip_path}")
+          logger.warning(f"Loading clip not found at {self.__loading_clip_path}")
         except Exception as e:
-          logging.error(f"Error reading loading clip: {e}")
+          logger.error(f"Error reading loading clip: {e}")
       
       self.__fifo.put((segment, final_clip_file, clip_bytes, callback), timeout=120)
       self.__setup_fifo.task_done()
@@ -143,18 +148,18 @@ class ClipsFifo:
                 os.mkfifo(self.__fifo_path) # Attempt to create if it doesn't exist
                 fifo_fp = open(self.__fifo_path, "wb")
             except Exception as e:
-                logging.error(f"Error opening FIFO {self.__fifo_path}: {e}")
+                logger.error(f"Error opening FIFO {self.__fifo_path}: {e}")
                 time.sleep(5) # Wait before retrying
                 continue
 
           fifo_fp.write(offline_bytes)
           fifo_fp.flush() # Ensure bytes are written immediately
-          logging.debug(f"Displaying offline screen to {self.__fifo_path}")
+          # logger.debug(f"Displaying offline screen to {self.__fifo_path}")
         except FileNotFoundError:
-          logging.warning(f"Offline clip source not found: {self.__offline_clip_bytes_source}. Skipping offline clip.")
+          logger.warning(f"Offline clip source not found: {self.__offline_clip_bytes_source}. Skipping.")
           time.sleep(5)
         except Exception as e:
-          logging.error(f"Error processing offline clip for {self.__fifo_path}: {e}")
+          logger.error(f"Error processing offline clip: {e}")
           if fifo_fp:
             fifo_fp.close()
             fifo_fp = None
@@ -170,7 +175,7 @@ class ClipsFifo:
         continue # Should not happen often due to outer while loop condition
 
       if clip_file is not None:
-        logging.info(f"Start Processing: {path.basename(clip_file)} for {self.__fifo_path}")
+        logger.info(f"Streaming clip: {path.basename(clip_file)}")
 
       if fifo_fp is None:
         try:
@@ -179,7 +184,7 @@ class ClipsFifo:
             os.mkfifo(self.__fifo_path) # Attempt to create if it doesn't exist
             fifo_fp = open(self.__fifo_path, "wb")
         except Exception as e:
-            logging.error(f"Error opening FIFO {self.__fifo_path}: {e}")
+            logger.error(f"Error opening FIFO {self.__fifo_path}: {e}")
             self.__fifo.task_done()
             time.sleep(5)
             continue
@@ -188,7 +193,7 @@ class ClipsFifo:
           fifo_fp.write(clip_bytes)
           fifo_fp.flush()
       except BrokenPipeError:
-          logging.warning(f"Broken pipe while writing to {self.__fifo_path}. Reopening FIFO.")
+          logger.warning(f"Broken pipe while writing to {self.__fifo_path}. Reopening FIFO.")
           if fifo_fp:
               fifo_fp.close()
               fifo_fp = None
@@ -198,7 +203,7 @@ class ClipsFifo:
           time.sleep(1) # Small delay to avoid tight loop on broken pipe
           continue
       except Exception as e:
-          logging.error(f"Error writing clip bytes to {self.__fifo_path}: {e}")
+          logger.error(f"Error writing clip bytes to FIFO: {e}")
           if fifo_fp:
               fifo_fp.close()
               fifo_fp = None
@@ -213,7 +218,7 @@ class ClipsFifo:
         fifo_fp = None
 
       if clip_file is not None:
-        logging.info(f"Done Processing: {path.basename(clip_file)} for {self.__fifo_path}")
+        logger.debug(f"Finished streaming: {path.basename(clip_file)}")
       self.__callback_fifo.put((segment, clip_file, callback))
       self.__fifo.task_done()
 
@@ -228,13 +233,13 @@ class ClipsFifo:
         try:
           callback()
         except Exception as e:
-          logging.error(f"Error in callback for {clip_file}: {e}")
+          logger.error(f"Error in callback for {clip_file}: {e}")
 
       if segment is not None and self.__mark_segment_processed_func is not None:
         try:
           self.__mark_segment_processed_func(segment)
         except Exception as e:
-          logging.error(f"Error marking segment processed for {segment}: {e}")
+          logger.error(f"Error marking segment processed for {segment}: {e}")
 
       # Clean up clip files if delete_clips is True
       if self.__delete_clips and clip_file is not None:
@@ -243,16 +248,16 @@ class ClipsFifo:
           try:
             if os.path.exists(clip_file):
               os.remove(clip_file)
-              logging.debug(f"Deleted clip file: {clip_file}")
+              logger.debug(f"Deleted clip file: {clip_file}")
           except OSError as e:
-            logging.error(f"Error deleting clip file {clip_file}: {e}")
+            logger.error(f"Error deleting clip file {clip_file}: {e}")
       self.__callback_fifo.task_done()
 
   def __Watchdog(self):
     while self.__run:
       time.sleep(30)
       if not self.Alive():
-        logging.error("ClipsFifo watchdog triggered. One or more threads are not alive.")
+        logger.error("ClipsFifo watchdog triggered. One or more threads are not alive.")
         self.Stop()
         break
 
@@ -262,7 +267,7 @@ class ClipsFifo:
   def Stop(self):
     self.__run = False
     # Signal threads to stop and join them
-    logging.info("Stopping ClipsFifo threads...")
+    logger.info("Stopping ClipsFifo threads...")
     self.__setup_fifo.join() # Wait for all items to be processed
     self.__fifo.join()
     self.__callback_fifo.join()
@@ -273,14 +278,14 @@ class ClipsFifo:
     self.__watchdog.join(timeout=5)
 
     if self.__t0.is_alive():
-        logging.warning("FifoSetupThread did not terminate cleanly.")
+        logger.warning("FifoSetupThread did not terminate cleanly.")
     if self.__t1.is_alive():
-        logging.warning("FifoProcessThread did not terminate cleanly.")
+        logger.warning("FifoProcessThread did not terminate cleanly.")
     if self.__t2.is_alive():
-        logging.warning("FifoCallbackThread did not terminate cleanly.")
+        logger.warning("FifoCallbackThread did not terminate cleanly.")
     if self.__watchdog.is_alive():
-        logging.warning("FifoWatchdog did not terminate cleanly.")
-    logging.info("ClipsFifo stopped.")
+        logger.warning("FifoWatchdog did not terminate cleanly.")
+    logger.info("ClipsFifo stopped.")
 
   def Alive(self) -> bool:
     return self.__t0.is_alive() and self.__t1.is_alive() and self.__t2.is_alive()
@@ -288,22 +293,22 @@ class ClipsFifo:
 # Make a dummy CommaDatabase and WriteTextVideo for testing or if not provided
 class DummyCommaDatabase:
   def mark_segment_processed(self, segment):
-    logging.info(f"DummyCommaDatabase: Marked segment processed: {segment.unique_name()}")
+    logger.info(f"DummyCommaDatabase: Marked segment processed: {segment.unique_name()}")
 
 def dummy_write_text_video(input_video: str, output_video: str, timestamp: str, segment):
-  logging.info(f"DummyWriteTextVideo: Input: {input_video}, Output: {output_video}, Timestamp: {timestamp}, Segment: {segment.unique_name()}")
+  logger.info(f"DummyWriteTextVideo: Input: {input_video}, Output: {output_video}, Timestamp: {timestamp}, Segment: {segment.unique_name()}")
   # Simulate creation of a text video by copying the input to output
   try:
       import shutil
       shutil.copyfile(input_video, output_video)
   except FileNotFoundError:
-      logging.error(f"DummyWriteTextVideo: Input video not found: {input_video}")
+      logger.error(f"DummyWriteTextVideo: Input video not found: {input_video}")
   except Exception as e:
-      logging.error(f"DummyWriteTextVideo: Error copying file: {e}")
+      logger.error(f"DummyWriteTextVideo: Error copying file: {e}")
 
 if __name__ == '__main__':
     # Example usage for testing the generic ClipsFifo
-    logging.basicConfig(level=logging.DEBUG, format='%(asctime)s - %(threadName)s - %(levelname)s - %(message)s')
+    logging.basicConfig(level=logging.DEBUG, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
 
     # Create dummy files for testing
     temp_dir = "/tmp/fifo_test"
@@ -345,16 +350,16 @@ if __name__ == '__main__':
 
     # Simulate a reader for the FIFO
     def fifo_reader():
-        logging.info("FIFO Reader: Starting...")
+        logger.info("FIFO Reader: Starting...")
         with open(test_fifo_path, "rb") as f:
             while fifo.Alive():
                 content = f.read(1024) # Read in chunks
                 if content:
-                    logging.info(f"FIFO Reader: Read {len(content)} bytes.")
+                    logger.info(f"FIFO Reader: Read {len(content)} bytes.")
                 else:
-                    logging.info("FIFO Reader: No more content. Waiting...")
+                    logger.info("FIFO Reader: No more content. Waiting...")
                 time.sleep(0.1)
-        logging.info("FIFO Reader: Exiting.")
+        logger.info("FIFO Reader: Exiting.")
 
     reader_thread = threading.Thread(target=fifo_reader, name="FifoReaderThread")
     reader_thread.start()
@@ -370,6 +375,8 @@ if __name__ == '__main__':
     os.remove(test_loading_clip)
     os.remove(test_offline_clip)
     # The actual clips should be deleted by the fifo itself
+    os.remove(test_clip1)
+    os.remove(test_clip2)
     os.remove(test_fifo_path)
     os.rmdir(temp_dir)
-    logging.info("Test finished and cleaned up.")
+    logger.info("Test finished and cleaned up.")
