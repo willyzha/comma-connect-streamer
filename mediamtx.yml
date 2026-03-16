@@ -1,0 +1,21 @@
+# MediaMTX Configuration for Comma Streamer
+
+# Default RTSP port is 8554
+# Default RTMP port is 1935
+# Default HLS port is 8888
+# Default WebRTC port is 8889
+
+paths:
+  comma_dashcam:
+    # Use ffmpeg to read from the FIFO and push to mediamtx
+    # -re ensures it reads at a real-time rate
+    # -f mpegts specifies the input format from fifo_streamer.py
+    # -c copy avoids transcoding
+    runOnInit: ffmpeg -re -i /dev/shm/new_clip.fifo -c copy -f rtsp rtsp://localhost:8554/comma_dashcam
+    runOnInitRestart: yes
+
+# Allow connections from any IP
+rtspAddress: :8554
+rtmpAddress: :1935
+hlsAddress: :8888
+webrtcAddress: :8889
