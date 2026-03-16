@@ -215,7 +215,7 @@ def GetSegments(start_time=None, end_time=None, check_db=CHECK_DATABASE, db_inst
   if end_time is not None:
     end_millis = unix_time_millis(end_time)
 
-  logging.info(f"Get segments from {start_millis} to {end_millis}")
+  logging.debug(f"Searching for segments from {start_millis} to {end_millis}...")
 
   s = requests.Session()
   retries = Retry(total=HTTP_REQUEST_RETRIES,
@@ -243,19 +243,17 @@ def GetSegments(start_time=None, end_time=None, check_db=CHECK_DATABASE, db_inst
           db.close()
 
       if all_segments_exist:
-        logging.debug(f"All {route_name} segments exist in database")
+        logging.debug(f"All {route_name} segments already exist in DB. Skipping.")
         continue
-    logging.debug(f"Getting segments for route {route_name}")
+    logging.debug(f"Getting download URLs for route {route_name}")
     download_urls = GetSegmentDownloadUrls(route_name)
 
     if len(download_urls.keys()) == 0:
-      logging.warning(f"Got no URLs when expected {len(route['segment_numbers'])}. Skipping route {route_name}")
+      logging.warning(f"Got no URLs for route {route_name} when expected {len(route['segment_numbers'])}. Skipping route.")
       continue
     if len(download_urls.keys()) != len(route['segment_numbers']):
-      logging.warning(f"Got an incorrect number of URLs, expected {len(route['segment_numbers'])}, got {len(download_urls)}")
+      logging.warning(f"Got an incorrect number of URLs for {route_name}, expected {len(route['segment_numbers'])}, got {len(download_urls)}")
       # return segments
-
-    logging.debug(f"Route: {route}")
 
     for i in route['segment_numbers']:
       if i in download_urls.keys():
@@ -271,6 +269,8 @@ def GetSegments(start_time=None, end_time=None, check_db=CHECK_DATABASE, db_inst
                   segment_start_time,
                   segment_end_time,
                   download_urls[i]))
+  
+  logging.info(f"Found {len(segments)} new segments between {start_millis} and {end_millis}.")
   return sorted(segments, key=lambda x: x.start_time)
 
 def GetSegmentDownloadUrls(route_fullname):
@@ -285,11 +285,15 @@ def GetSegmentDownloadUrls(route_fullname):
 
   urls = {}
   for download_url in response.json()['qcameras']:
-    logging.debug(f"{download_url}")
+    logging.debug(f"Found qcamera URL: {download_url}")
     
     match = re.search(r'--(\d+)--qcamera.ts', download_url)
-    logging.debug(match.group())
-    urls[int(match.group(1))] = download_url
+    if match:
+      segment_index = int(match.group(1))
+      logging.debug(f"Parsed segment index {segment_index} from URL")
+      urls[segment_index] = download_url
+    else:
+      logging.warning(f"Could not parse segment index from URL: {download_url}")
 
   return urls
 
@@ -299,7 +303,7 @@ def DownloadSegment(segment):
   for char in invalid:
     filename = filename.replace(char, '')
 
-  logging.debug("Downloading segment: " + filename)
+  logging.info(f"Downloading segment: {filename}")
   dir = path.join(DOWNLOAD_PATH, filename)
   urllib.request.urlretrieve(segment.download_url, dir)
   return dir
@@ -307,7 +311,7 @@ def DownloadSegment(segment):
 def main():
   db = None
   try:
-    logging.info("Start comma_download.py")
+    logging.info("Starting comma_download.py")
     db = CommaDatabase()
     db.create()
     db.cleanup_unprocessed()
@@ -342,19 +346,19 @@ def main():
       while not unprocessed_segments.empty():
         segment = unprocessed_segments.get()
         if db.segment_exists(segment):
-          logging.debug(f"{segment} already exists")
+          logging.debug(f"Segment {segment.unique_name()} already exists in DB, skipping.")
           continue
         latest_segment_time = datetime.now(UTC)
         clip = DownloadSegment(segment)
         fifo.AddClip(segment, clip, None)
         db.add_segment(segment)
         if datetime.now(UTC) - get_segment_time > timedelta(minutes=45):
-          logging.debug(f"Segments haven't refreshed in 45min")
+          logging.warning(f"Segment retrieval loop has been running for 45 minutes, breaking to refresh.")
           break
 
       # If it's been more than 10min since the last new segment reduce the polling freq to 5min
       if datetime.now(UTC) - latest_segment_time > timedelta(minutes=10):
-        logging.debug("Lowering polling requencey to 5min")
+        logging.info("No new segments found in 10 minutes. Lowering polling frequency to 5 minutes.")
         sleep_s = 60 * 5
         db.cleanup()
       else:
@@ -366,15 +370,15 @@ def main():
 
 
   except Exception as e:
-    logging.error(f"Something died: {e}")
+    logging.error(f"Critical error in main loop: {e}")
     traceback.print_exc()
   finally:
-    logging.error(f"stopping the fifo before exiting")
+    logging.info("Shutting down comma_download.py...")
     # Make sure fifo is defined before calling stop in case of early error
     if 'fifo' in locals() and fifo.Alive():
         fifo.Stop()
     else:
-        logging.error("Fifo was not initialized or not alive, cannot stop.")
+        logging.debug("FIFO was not initialized or not alive during shutdown.")
     
     if db:
         db.close()
