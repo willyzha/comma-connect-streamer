@@ -16,9 +16,4 @@ services:
     volumes:
       - ./data:/data
       - ./comma_downloads.db:/app/comma_downloads.db
-      - ./mediamtx.yml:/app/mediamtx.yml
-      - ./config.docker.ini:/app/config.docker.ini
-      - ./comma_download.py:/app/comma_download.py
-      - ./fifo_streamer.py:/app/fifo_streamer.py
-      - ./docker-start.sh:/app/docker-start.sh
     shm_size: '256mb' # Needed for FIFOs in /dev/shm

@@ -1,5 +1,6 @@
 #!/bin/bash
 
+# --- 1. Configuration Setup ---
 # Use config.docker.ini if it exists (local build), otherwise fallback to example
 if [ -f "/app/config.docker.ini" ]; then
   cp /app/config.docker.ini /app/config.ini
@@ -11,37 +12,51 @@ fi
 if [ ! -z "$COMMA_JWT_KEY" ]; then
   sed -i "s|^JWT_KEY = .*|JWT_KEY = $COMMA_JWT_KEY|" /app/config.ini
 fi
-if [ ! -z "$COMMA_DATABASE_PATH" ]; then
-  sed -i "s|^DATABASE_PATH = .*|DATABASE_PATH = $COMMA_DATABASE_PATH|" /app/config.ini
-fi
-if [ ! -z "$DOWNLOAD_PATH" ]; then
-  sed -i "s|^DOWNLOAD_PATH = .*|DOWNLOAD_PATH = $DOWNLOAD_PATH|" /app/config.ini
+
+# --- 2. MediaMTX Config Generation ---
+# Generate mediamtx.yml if it doesn't exist (allowing for easy deployment without a volume)
+if [ ! -f "/app/mediamtx.yml" ]; then
+  echo "Generating default mediamtx.yml..."
+  cat <<EOF > /app/mediamtx.yml
+paths:
+  comma_dashcam:
+    runOnInit: ffmpeg -re -i /dev/shm/new_clip.fifo -c copy -f rtsp rtsp://localhost:8554/comma_dashcam
+    runOnInitRestart: yes
+rtspAddress: :8554
+rtmpAddress: :1935
+hlsAddress: :8888
+webrtcAddress: :8889
+EOF
 fi
 
+# --- 3. Database Initialization ---
+# Ensure the database file exists so SQLite doesn't fail
+if [ ! -f "/app/comma_downloads.db" ]; then
+  echo "Initializing empty database..."
+  touch /app/comma_downloads.db
+fi
+
+# --- 4. Environment Setup ---
 # Create FIFOs if they don't exist
-# This helps MediaMTX's ffmpeg readers start correctly
 mkdir -p /dev/shm
 [[ -p /dev/shm/new_clip.fifo ]] || mkfifo /dev/shm/new_clip.fifo
 
 # Ensure data directories exist
 mkdir -p /data/dashcam/clips
 
-# Start MediaMTX in the background
+# --- 5. Start Processes ---
 echo "Starting MediaMTX..."
 /usr/local/bin/mediamtx /app/mediamtx.yml &
 MEDIAMTX_PID=$!
 
-# Wait for MediaMTX to start
 sleep 2
 
-# Start Comma Download script
 if [ "$DISABLE_COMMA" != "true" ]; then
   echo "Starting Comma Download script..."
   python /app/comma_download.py &
   COMMA_PID=$!
 fi
 
-# Function to handle shutdown
 cleanup() {
     echo "Shutting down..."
     [ ! -z "$MEDIAMTX_PID" ] && kill $MEDIAMTX_PID
@@ -51,9 +66,5 @@ cleanup() {
 }
 
 trap cleanup SIGINT SIGTERM
-
-# Wait for any process to exit
 wait -n
-
-# If any process exits, kill the others and exit
 cleanup
