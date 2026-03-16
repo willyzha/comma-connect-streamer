@@ -9,36 +9,14 @@ mkdir -p /dev/shm/dashcam/clips
 [[ -p /dev/shm/new_clip.fifo ]] || mkfifo /dev/shm/new_clip.fifo
 
 # --- 2. Configuration Setup ---
-# We prioritize config.ini in the mounted /config directory.
-if [ ! -f "/config/config.ini" ]; then
-  echo "No config.ini found in /config. Initializing..."
-  if [ -f "/app/config.docker.ini" ]; then
-    cp /app/config.docker.ini /config/config.ini
-  else
-    cp /app/config.example.ini /config/config.ini
-  fi
+# We prioritize .env in the mounted /config directory.
+if [ ! -f "/config/.env" ]; then
+  echo "No .env file found in /config. Initializing with defaults from .env.example..."
+  cp /app/.env.example /config/.env
 fi
 
-# Link /config/config.ini to where the app expects it
-cp /config/config.ini /app/config.ini
-
-# Check if DONGLE_ID exists in the config, if not, try to add it from ENV or a default
-if ! grep -q "DONGLE_ID =" /app/config.ini; then
-  echo "DONGLE_ID missing from config.ini. Adding it..."
-  echo "DONGLE_ID = ${COMMA_DONGLE_ID:-your_dongle_id_here}" >> /app/config.ini
-fi
-
-# Support for environment variables to override the working config
-if [ ! -z "$COMMA_JWT_KEY" ]; then
-  sed -i "s|^JWT_KEY = .*|JWT_KEY = $COMMA_JWT_KEY|" /app/config.ini
-fi
-
-if [ ! -z "$COMMA_DONGLE_ID" ]; then
-  sed -i "s|^DONGLE_ID = .*|DONGLE_ID = $COMMA_DONGLE_ID|" /app/config.ini
-fi
-
-# Sync changes back to /config for persistence
-cp /app/config.ini /config/config.ini
+# Link /config/.env to where the app expects it
+ln -sf /config/.env /app/.env
 
 # --- 3. MediaMTX Config Generation ---
 # We always generate this in /tmp so it's ephemeral and stays up-to-date with image updates

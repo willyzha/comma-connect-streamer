@@ -1,11 +1,10 @@
 # --- Environment & Config ---
+.env
+.env.docker
+! .env.example
 config/
-config.ini
-config.docker.ini
-config.docker.ini.bak
 *.db
 *.log
-.env
 
 # --- Data & Media ---
 data/

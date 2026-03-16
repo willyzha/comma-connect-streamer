@@ -18,36 +18,50 @@ from logging.handlers import RotatingFileHandler
 from dataclasses import dataclass 
 import sys
 import shutil
-import configparser
+from dotenv import load_dotenv
 from fifo_streamer import ClipsFifo, GenericSegment
 
-# Load configuration
-config = configparser.ConfigParser(interpolation=configparser.ExtendedInterpolation())
+# Load configuration from .env file if it exists
 script_dir = os.path.dirname(os.path.abspath(__file__))
-config_path = os.path.join(script_dir, 'config.ini')
-config.read(config_path)
+env_path = os.path.join(script_dir, '.env')
+load_dotenv(env_path)
 
-# CONFIGS from config.ini
-DONGLE_ID = config.get('COMMA', 'DONGLE_ID')
-WRITE_TIMESTAMPS = config.get('COMMA', 'DONGLE_ID')
-WRITE_TIMESTAMPS = config.getboolean('COMMA', 'WRITE_TIMESTAMPS')
-DELETE_CLIPS = config.getboolean('COMMA', 'DELETE_CLIPS')
-LOG_LEVEL = getattr(logging, config.get('COMMA', 'LOG_LEVEL'))
-CHECK_DATABASE = config.getboolean('COMMA', 'CHECK_DATABASE')
-STOP_AT_FIRST_PROCESSED = config.getboolean('COMMA', 'STOP_AT_FIRST_PROCESSED')
-END_TIMEDELTA = timedelta(minutes=config.getint('COMMA', 'END_TIMEDELTA_MINUTES'))
-TIME_RANGE = timedelta(days=config.getint('COMMA', 'TIME_RANGE_DAYS'))
-JWT_KEY = config.get('COMMA', 'JWT_KEY')
-if not JWT_KEY.startswith('JWT '):
+# Helper to get config with defaults and ENV overrides
+def get_config(key, fallback, type=str):
+    # Try environment variable first (load_dotenv makes .env vars available as env vars)
+    val = os.environ.get(key)
+    if val is not None:
+        if type == bool:
+            return val.lower() in ('true', '1', 't', 'y', 'yes')
+        if type == int:
+            try:
+              return int(val)
+            except ValueError:
+              return fallback
+        return val
+    return fallback
+
+# CONFIGS (with ENV/ .env overrides)
+DONGLE_ID = get_config('COMMA_DONGLE_ID', 'your_dongle_id_here')
+WRITE_TIMESTAMPS = get_config('WRITE_TIMESTAMPS', True, type=bool)
+DELETE_CLIPS = get_config('DELETE_CLIPS', True, type=bool)
+LOG_LEVEL_STR = get_config('LOG_LEVEL', 'INFO')
+LOG_LEVEL = getattr(logging, LOG_LEVEL_STR.upper(), logging.INFO)
+CHECK_DATABASE = get_config('CHECK_DATABASE', True, type=bool)
+STOP_AT_FIRST_PROCESSED = get_config('STOP_AT_FIRST_PROCESSED', True, type=bool)
+END_TIMEDELTA = timedelta(minutes=get_config('END_TIMEDELTA_MINUTES', 5, type=int))
+TIME_RANGE = timedelta(days=get_config('TIME_RANGE_DAYS', 3, type=int))
+JWT_KEY = get_config('COMMA_JWT_KEY', 'your_jwt_key_here')
+if not JWT_KEY.startswith('JWT ') and JWT_KEY != 'your_jwt_key_here':
     JWT_KEY = f"JWT {JWT_KEY}"
-HTTP_REQUEST_RETRIES = config.getint('COMMA', 'HTTP_REQUEST_RETRIES')
-DATABASE_PATH = config.get('COMMA', 'DATABASE_PATH')
-FIFO_PATH = config.get('COMMA', 'FIFO_PATH')
-DOWNLOAD_PATH = config.get('COMMA', 'DOWNLOAD_PATH')
-FFMPEG_PATH = config.get('COMMON', 'FFMPEG_PATH')
-FONT_PATH = config.get('COMMA', 'FONT_PATH')
-LOADING_PATH = config.get('COMMA', 'LOADING_PATH')
-OFFLINE_PATH = config.get('COMMA', 'OFFLINE_PATH')
+HTTP_REQUEST_RETRIES = get_config('HTTP_REQUEST_RETRIES', 10, type=int)
+DATABASE_PATH = get_config('DATABASE_PATH', '/config/comma_downloads.db')
+FIFO_PATH = get_config('FIFO_PATH', '/dev/shm/new_clip.fifo')
+DOWNLOAD_PATH = get_config('DOWNLOAD_PATH', '/dev/shm/dashcam/clips')
+FFMPEG_PATH = get_config('FFMPEG_PATH', '/usr/bin/ffmpeg')
+FONT_PATH = get_config('FONT_PATH', '/usr/share/fonts/roboto/Roboto-Thin.ttf')
+LOADING_PATH = get_config('LOADING_PATH', '/app/loading.ts')
+OFFLINE_PATH = get_config('OFFLINE_PATH', '/app/offline.ts')
 
 epoch = datetime.fromtimestamp(0, timezone.utc)
 logging.basicConfig(

@@ -16,7 +16,7 @@ FROM python:3.11-alpine
 RUN apk add --no-cache ffmpeg bash fontconfig font-roboto
 
 # Install Python dependencies
-RUN pip install --no-cache-dir requests watchdog
+RUN pip install --no-cache-dir requests watchdog python-dotenv
 
 # Set working directory
 WORKDIR /app

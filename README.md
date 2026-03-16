@@ -14,9 +14,9 @@ This project downloads clips from Comma.ai servers and streams them as an RTSP v
 1. **Clone the repository.**
 2. **Create your configuration**:
    ```bash
-   cp config.example.ini config.docker.ini
+   cp .env.example .env
    ```
-   Edit `config.docker.ini` and add your `JWT_KEY`.
+   Edit `.env` and add your `COMMA_JWT_KEY` and `COMMA_DONGLE_ID`.
 3. **Launch with Docker Compose**:
    ```bash
    docker compose up --build -d
@@ -26,8 +26,11 @@ This project downloads clips from Comma.ai servers and streams them as an RTSP v
    `rtsp://your-ip:8554/comma_dashcam`
 
 ## Environment Variables
-- `COMMA_JWT_KEY`: Override the JWT key in `config.ini`.
+The following can be set in your `.env` file or passed directly to Docker:
+- `COMMA_JWT_KEY`: Your Comma.ai JWT key.
+- `COMMA_DONGLE_ID`: Your Comma.ai Dongle ID.
+- `WRITE_TIMESTAMPS`: Set to `False` to disable video overlays.
 - `DISABLE_COMMA`: Set to `true` to stop the Comma download script.
 
 ## Configuration
-Most settings can be adjusted in `config.docker.ini` before building, or mapped via volumes for live updates.
+Most settings can be adjusted in `.env` before building, or mapped via volumes for live updates.
