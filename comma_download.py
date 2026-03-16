@@ -38,6 +38,8 @@ STOP_AT_FIRST_PROCESSED = config.getboolean('COMMA', 'STOP_AT_FIRST_PROCESSED')
 END_TIMEDELTA = timedelta(minutes=config.getint('COMMA', 'END_TIMEDELTA_MINUTES'))
 TIME_RANGE = timedelta(days=config.getint('COMMA', 'TIME_RANGE_DAYS'))
 JWT_KEY = config.get('COMMA', 'JWT_KEY')
+if not JWT_KEY.startswith('JWT '):
+    JWT_KEY = f"JWT {JWT_KEY}"
 HTTP_REQUEST_RETRIES = config.getint('COMMA', 'HTTP_REQUEST_RETRIES')
 DATABASE_PATH = config.get('COMMA', 'DATABASE_PATH')
 FIFO_PATH = config.get('COMMA', 'FIFO_PATH')
