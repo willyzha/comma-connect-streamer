@@ -22,9 +22,9 @@ from dotenv import load_dotenv
 from fifo_streamer import ClipsFifo, GenericSegment
 
 # Load configuration from .env file if it exists
-script_dir = os.path.dirname(os.path.abspath(__file__))
-env_path = os.path.join(script_dir, '.env')
-load_dotenv(env_path)
+# We check both the script directory and the current working directory
+load_dotenv(os.path.join(os.getcwd(), '.env'))
+load_dotenv(os.path.join(os.path.dirname(os.path.abspath(__file__)), '.env'))
 
 # Helper to get config with defaults and ENV overrides
 def get_config(key, fallback, type=str):
@@ -63,10 +63,7 @@ FONT_PATH = get_config('FONT_PATH', '/usr/share/fonts/roboto/Roboto-Thin.ttf')
 LOADING_PATH = get_config('LOADING_PATH', '/app/loading.ts')
 OFFLINE_PATH = get_config('OFFLINE_PATH', '/app/offline.ts')
 
-# Helper to get logger
-logger = logging.getLogger('downloader')
-
-epoch = datetime.fromtimestamp(0, timezone.utc)
+# Initialize logging globally
 logging.basicConfig(
   format='[%(asctime)s] [%(name)s] %(message)s',
   datefmt='%m/%d/%Y %I:%M:%S %p',
@@ -74,6 +71,11 @@ logging.basicConfig(
   handlers=[
     RotatingFileHandler(filename="/app/comma_download.log", maxBytes=1024*1024),
     logging.StreamHandler()])
+
+# Helper to get logger
+logger = logging.getLogger('downloader')
+
+epoch = datetime.fromtimestamp(0, timezone.utc)
 
 
 @dataclass
@@ -147,7 +149,7 @@ class CommaDatabase:
   """)
 
   def add_segment(self, segment: Segment):
-    time = unix_time_millis(datetime.now(UTC))
+    time_now = unix_time_millis(datetime.now(UTC))
   
     rows = [
       (segment.unique_name(), segment.start_time, 0)
@@ -287,15 +289,15 @@ def GetSegmentDownloadUrls(route_fullname):
 
   urls = {}
   for download_url in response.json()['qcameras']:
-    logging.debug(f"Found qcamera URL: {download_url}")
+    logger.debug(f"Found qcamera URL: {download_url}")
     
     match = re.search(r'--(\d+)--qcamera.ts', download_url)
     if match:
       segment_index = int(match.group(1))
-      logging.debug(f"Parsed segment index {segment_index} from URL")
+      logger.debug(f"Parsed segment index {segment_index} from URL")
       urls[segment_index] = download_url
     else:
-      logging.warning(f"Could not parse segment index from URL: {download_url}")
+      logger.warning(f"Could not parse segment index from URL: {download_url}")
 
   return urls
 
@@ -305,7 +307,7 @@ def DownloadSegment(segment):
   for char in invalid:
     filename = filename.replace(char, '')
 
-  logging.info(f"Downloading segment: {filename}")
+  logger.info(f"Downloading segment: {filename}")
   dir = path.join(DOWNLOAD_PATH, filename)
   urllib.request.urlretrieve(segment.download_url, dir)
   return dir
@@ -313,7 +315,7 @@ def DownloadSegment(segment):
 def main():
   db = None
   try:
-    logging.info("Starting comma_download.py")
+    logger.info("Starting comma_download.py")
     db = CommaDatabase()
     db.create()
     db.cleanup_unprocessed()
@@ -354,7 +356,7 @@ def main():
 
       # If it's been more than 10min since the last new segment reduce the polling freq to 5min
       if datetime.now(UTC) - latest_segment_time > timedelta(minutes=10):
-        logger.info("No new segments found in 10 minutes. Lowering polling frequency to 5 minutes.")
+        logger.debug("No new segments found in 10 minutes. Lowering polling frequency to 5 minutes.")
         sleep_s = 60 * 5
         db.cleanup()
       else:
@@ -366,15 +368,15 @@ def main():
 
 
   except Exception as e:
-    logging.error(f"Critical error in main loop: {e}")
+    logger.error(f"Critical error in main loop: {e}")
     traceback.print_exc()
   finally:
-    logging.info("Shutting down comma_download.py...")
+    logger.info("Shutting down comma_download.py...")
     # Make sure fifo is defined before calling stop in case of early error
     if 'fifo' in locals() and fifo.Alive():
         fifo.Stop()
     else:
-        logging.debug("FIFO was not initialized or not alive during shutdown.")
+        logger.debug("FIFO was not initialized or not alive during shutdown.")
     
     if db:
         db.close()
