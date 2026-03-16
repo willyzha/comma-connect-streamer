@@ -24,8 +24,12 @@ cp /config/config.ini /app/config.ini
 # Support for environment variables to override the working config
 if [ ! -z "$COMMA_JWT_KEY" ]; then
   sed -i "s|^JWT_KEY = .*|JWT_KEY = $COMMA_JWT_KEY|" /app/config.ini
-  # Also sync back to /config for persistence
   sed -i "s|^JWT_KEY = .*|JWT_KEY = $COMMA_JWT_KEY|" /config/config.ini
+fi
+
+if [ ! -z "$COMMA_DONGLE_ID" ]; then
+  sed -i "s|^DONGLE_ID = .*|DONGLE_ID = $COMMA_DONGLE_ID|" /app/config.ini
+  sed -i "s|^DONGLE_ID = .*|DONGLE_ID = $COMMA_DONGLE_ID|" /config/config.ini
 fi
 
 # --- 3. MediaMTX Config Generation ---

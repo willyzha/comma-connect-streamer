@@ -28,6 +28,8 @@ config_path = os.path.join(script_dir, 'config.ini')
 config.read(config_path)
 
 # CONFIGS from config.ini
+DONGLE_ID = config.get('COMMA', 'DONGLE_ID')
+WRITE_TIMESTAMPS = config.get('COMMA', 'DONGLE_ID')
 WRITE_TIMESTAMPS = config.getboolean('COMMA', 'WRITE_TIMESTAMPS')
 DELETE_CLIPS = config.getboolean('COMMA', 'DELETE_CLIPS')
 LOG_LEVEL = getattr(logging, config.get('COMMA', 'LOG_LEVEL'))
