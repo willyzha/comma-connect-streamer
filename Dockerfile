@@ -11,7 +11,9 @@ FROM python:3.11-alpine
 # Install minimal runtime dependencies
 # ffmpeg: for video processing
 # bash: for the startup script
-RUN apk add --no-cache ffmpeg bash
+# fontconfig: for managing fonts
+# ttf-roboto: standard system package for Roboto fonts
+RUN apk add --no-cache ffmpeg bash fontconfig font-roboto
 
 # Install Python dependencies
 RUN pip install --no-cache-dir requests watchdog

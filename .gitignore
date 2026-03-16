@@ -1,4 +1,5 @@
 # --- Environment & Config ---
+config/
 config.ini
 config.docker.ini
 config.docker.ini.bak
