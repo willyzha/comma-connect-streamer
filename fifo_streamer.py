@@ -130,97 +130,77 @@ class ClipsFifo:
     fifo_fp = None
 
     while self.__run:
-      # If FIFO is empty, continuously write offline clip
+      # Ensure FIFO is open
+      if fifo_fp is None:
+          try:
+              fifo_fp = open(self.__fifo_path, "wb")
+              logger.debug(f"Opened FIFO: {self.__fifo_path}")
+          except FileNotFoundError:
+              os.mkfifo(self.__fifo_path)
+              fifo_fp = open(self.__fifo_path, "wb")
+          except Exception as e:
+              logger.error(f"Error opening FIFO {self.__fifo_path}: {e}")
+              time.sleep(5)
+              continue
+
+      # If FIFO is empty, write offline clip frames
       while self.__fifo.empty() and self.__run:
         try:
-          # Handle offline_clip_bytes_source being a path or actual bytes
           if isinstance(self.__offline_clip_bytes_source, str): # It's a path
             with open(self.__offline_clip_bytes_source, "rb") as frame:
               offline_bytes = frame.read()
           else: # It's raw bytes
             offline_bytes = self.__offline_clip_bytes_source
 
-          if fifo_fp is None:
-            # Open FIFO only once if possible to avoid overhead
-            try:
-                fifo_fp = open(self.__fifo_path, "wb")
-            except FileNotFoundError:
-                os.mkfifo(self.__fifo_path) # Attempt to create if it doesn't exist
-                fifo_fp = open(self.__fifo_path, "wb")
-            except Exception as e:
-                logger.error(f"Error opening FIFO {self.__fifo_path}: {e}")
-                time.sleep(5) # Wait before retrying
-                continue
-
           fifo_fp.write(offline_bytes)
-          fifo_fp.flush() # Ensure bytes are written immediately
-          # logger.debug(f"Displaying offline screen to {self.__fifo_path}")
-        except FileNotFoundError:
-          logger.warning(f"Offline clip source not found: {self.__offline_clip_bytes_source}. Skipping.")
-          time.sleep(5)
+          fifo_fp.flush()
+        except BrokenPipeError:
+          logger.warning(f"Broken pipe while writing offline clip to {self.__fifo_path}. Reopening...")
+          fifo_fp.close()
+          fifo_fp = None
+          break # Outer loop will reopen
         except Exception as e:
           logger.error(f"Error processing offline clip: {e}")
-          if fifo_fp:
-            fifo_fp.close()
-            fifo_fp = None
-          time.sleep(5) # Wait before retrying
+          time.sleep(5)
         time.sleep(1) # Prevent busy-waiting
 
-      if not self.__run: # Check run flag again after potentially waiting for fifo.empty()
-          break
+      if not self.__run or fifo_fp is None:
+          continue
 
       try:
         segment, clip_file, clip_bytes, callback = self.__fifo.get(timeout=1)
       except queue.Empty:
-        continue # Should not happen often due to outer while loop condition
+        continue
 
       if clip_file is not None:
         logger.info(f"Streaming clip: {path.basename(clip_file)}")
 
-      if fifo_fp is None:
-        try:
-            fifo_fp = open(self.__fifo_path, "wb")
-        except FileNotFoundError:
-            os.mkfifo(self.__fifo_path) # Attempt to create if it doesn't exist
-            fifo_fp = open(self.__fifo_path, "wb")
-        except Exception as e:
-            logger.error(f"Error opening FIFO {self.__fifo_path}: {e}")
-            self.__fifo.task_done()
-            time.sleep(5)
-            continue
-      
       try:
           fifo_fp.write(clip_bytes)
           fifo_fp.flush()
       except BrokenPipeError:
-          logger.warning(f"Broken pipe while writing to {self.__fifo_path}. Reopening FIFO.")
-          if fifo_fp:
-              fifo_fp.close()
-              fifo_fp = None
-          # Re-put the current item back to be processed after reopening FIFO
+          logger.warning(f"Broken pipe while writing to {self.__fifo_path}. Reopening...")
+          fifo_fp.close()
+          fifo_fp = None
+          # Re-put the current item back
           self.__fifo.put((segment, clip_file, clip_bytes, callback))
-          self.__fifo.task_done() # Mark current one as done since we re-queued it
-          time.sleep(1) # Small delay to avoid tight loop on broken pipe
+          self.__fifo.task_done()
+          time.sleep(1)
           continue
       except Exception as e:
           logger.error(f"Error writing clip bytes to FIFO: {e}")
-          if fifo_fp:
-              fifo_fp.close()
-              fifo_fp = None
           time.sleep(1)
           self.__fifo.task_done()
           continue
-
-
-      if self.__fifo.empty() and fifo_fp is not None:
-        # Close FIFO if queue is empty to allow readers to detect EOF and new readers to open
-        fifo_fp.close()
-        fifo_fp = None
 
       if clip_file is not None:
         logger.debug(f"Finished streaming: {path.basename(clip_file)}")
       self.__callback_fifo.put((segment, clip_file, callback))
       self.__fifo.task_done()
+    
+    # Cleanup on exit
+    if fifo_fp:
+        fifo_fp.close()
 
   def __ProcessCallback(self):
     while self.__run:
