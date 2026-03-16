@@ -1,0 +1,24 @@
+python/
+ffmpeg_bin/
+*.log
+*.db
+*.mp4
+*.ts
+*.slow.*
+__pycache__/
+.git/
+.gitignore
+setup.sh
+setup_comma.sh
+setup_nest.sh
+build_ffmpeg.sh
+SHA256SUMS.*
+1750832718-*
+output.*
+test_loading.mp4
+# Keep assets we need
+!loading.ts
+!offline.ts
+!nest_loading.mp4
+!nest_offline.mp4
+!Roboto-*.ttf
