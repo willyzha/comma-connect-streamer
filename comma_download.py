@@ -150,7 +150,6 @@ def WriteTextVideo(input_video: str, output_video: str, timestamp: str, segment:
     output_video]
   subprocess.call(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.STDOUT)
 #  subprocess.call(cmd)
-  time.sleep(5)
 
 class CommaDatabase:
   def __init__(self):
@@ -175,9 +174,11 @@ class CommaDatabase:
     with self.lock:
       if self.exists():
         return
-      res = self.db.execute("""
-        CREATE TABLE comma_clips(url, date, processed)
-  """)
+      self.db.execute("""
+        CREATE TABLE comma_clips(url TEXT PRIMARY KEY, date INTEGER, processed INTEGER)
+      """)
+      self.db.execute("CREATE INDEX IF NOT EXISTS idx_date ON comma_clips(date)")
+      self.db.commit()
 
   def add_segment(self, segment: Segment):
     time_now = unix_time_millis(datetime.now(UTC))
