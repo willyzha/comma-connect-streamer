@@ -21,6 +21,8 @@ import shutil
 from dotenv import load_dotenv
 from fifo_streamer import ClipsFifo, GenericSegment
 
+from comma_auth import CommaAuth
+
 # Load configuration from .env file if it exists
 # We check both the script directory and the current working directory
 load_dotenv(os.path.join(os.getcwd(), '.env'))
@@ -51,9 +53,15 @@ CHECK_DATABASE = get_config('CHECK_DATABASE', True, type=bool)
 STOP_AT_FIRST_PROCESSED = get_config('STOP_AT_FIRST_PROCESSED', True, type=bool)
 END_TIMEDELTA = timedelta(minutes=get_config('END_TIMEDELTA_MINUTES', 5, type=int))
 TIME_RANGE = timedelta(days=get_config('TIME_RANGE_DAYS', 3, type=int))
-JWT_KEY = get_config('COMMA_JWT_KEY', 'your_jwt_key_here')
-if not JWT_KEY.startswith('JWT ') and JWT_KEY != 'your_jwt_key_here':
-    JWT_KEY = f"JWT {JWT_KEY}"
+
+# Initialize Auth
+auth = CommaAuth(
+    jwt_key=get_config('COMMA_JWT_KEY', None),
+    github_user=get_config('GITHUB_USER', None),
+    github_pass=get_config('GITHUB_PASS', None),
+    cache_path=get_config('JWT_CACHE_PATH', '/data/jwt.cache')
+)
+
 HTTP_REQUEST_RETRIES = get_config('HTTP_REQUEST_RETRIES', 10, type=int)
 DATABASE_PATH = get_config('DATABASE_PATH', '/config/comma_downloads.db')
 FIFO_PATH = get_config('FIFO_PATH', '/dev/shm/new_clip.fifo')
@@ -85,15 +93,23 @@ retries = Retry(total=HTTP_REQUEST_RETRIES,
 api_session.mount('https://', HTTPAdapter(max_retries=retries))
 
 def make_api_request(url):
-    """Makes an authenticated GET request to the Comma API with robust error handling."""
+    """Makes an authenticated GET request to the Comma API with robust error handling and auto-refresh."""
     try:
-        response = api_session.get(url, headers={'Authorization': JWT_KEY}, timeout=30)
+        response = api_session.get(url, headers={'Authorization': auth.token}, timeout=30)
         response.raise_for_status()
         return response.json()
     except requests.exceptions.HTTPError as e:
         status_code = e.response.status_code
         if status_code == 401:
-            logger.error("AUTHENTICATION ERROR: Your JWT token is expired or invalid. Please check your COMMA_JWT_KEY.")
+            logger.error("AUTHENTICATION ERROR: Your JWT token is expired or invalid.")
+            if auth.handle_401():
+                try:
+                    # Retry once with the new token
+                    response = api_session.get(url, headers={'Authorization': auth.token}, timeout=30)
+                    response.raise_for_status()
+                    return response.json()
+                except Exception as retry_err:
+                    logger.error(f"Retry failed after JWT refresh: {retry_err}")
         elif status_code == 403:
             logger.error(f"PERMISSION ERROR: Access forbidden (403). Check if Dongle ID {DONGLE_ID} is correct and accessible with your token.")
         elif status_code == 404:
