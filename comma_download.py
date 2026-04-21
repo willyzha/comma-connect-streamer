@@ -68,6 +68,7 @@ FIFO_PATH = get_config('FIFO_PATH', '/dev/shm/new_clip.fifo')
 DOWNLOAD_PATH = get_config('DOWNLOAD_PATH', '/dev/shm/dashcam/clips')
 FFMPEG_PATH = get_config('FFMPEG_PATH', '/usr/bin/ffmpeg')
 FONT_PATH = get_config('FONT_PATH', '/usr/share/fonts/roboto/Roboto-Thin.ttf')
+FONT_SIZE = get_config('FONT_SIZE', 12, type=int)
 LOADING_PATH = get_config('LOADING_PATH', '/app/loading.ts')
 OFFLINE_PATH = get_config('OFFLINE_PATH', '/app/offline.ts')
 
@@ -140,8 +141,8 @@ class Segment:
 def WriteTextVideo(input_video: str, output_video: str, timestamp: str, segment: Segment):
 
   segment_str = segment.unique_name().replace('|','-')
-  drawtext_timestamp = f"drawtext=fontfile={FONT_PATH}:text='{timestamp}':fontcolor=white:fontsize=16:box=1:boxcolor=black@0.2:boxborderw=5:x=(w-text_w)-3:y=(h-text_h)-5"
-  drawtext_segment = f"drawtext=fontfile={FONT_PATH}:text='{segment_str}':fontcolor=white:fontsize=16:box=1:boxcolor=black@0.2:boxborderw=5:x=3:y=(h-text_h)-5"
+  drawtext_timestamp = f"drawtext=fontfile={FONT_PATH}:text='{timestamp}':fontcolor=white:fontsize={FONT_SIZE}:box=1:boxcolor=black@0.2:boxborderw=5:x=(w-text_w)-3:y=(h-text_h)-5"
+  drawtext_segment = f"drawtext=fontfile={FONT_PATH}:text='{segment_str}':fontcolor=white:fontsize={FONT_SIZE}:box=1:boxcolor=black@0.2:boxborderw=5:x=3:y=(h-text_h)-5"
 
   cmd = [
     FFMPEG_PATH,
