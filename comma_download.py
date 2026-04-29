@@ -19,6 +19,7 @@ from dataclasses import dataclass
 import sys
 import shutil
 from dotenv import load_dotenv
+from timezonefinder import TimezoneFinder
 from fifo_streamer import ClipsFifo, GenericSegment
 
 from comma_auth import CommaAuth
@@ -84,6 +85,8 @@ logging.basicConfig(
 # Helper to get logger
 logger = logging.getLogger('downloader')
 
+tf = TimezoneFinder()
+
 epoch = datetime.fromtimestamp(0, timezone.utc)
 
 # Configure a global requests session for connection pooling and retries
@@ -133,6 +136,7 @@ class Segment:
   start_time: int
   end_time: int
   download_url: str
+  timezone: str = "UTC"
 
   def unique_name(self):
     return self.route_name + "-" + str(self.segment_num)
@@ -269,10 +273,22 @@ def GetSegments(start_time=None, end_time=None, check_db=CHECK_DATABASE, db_inst
     for route in routes_data:
       route_name = route['fullname']
       
+      # Determine timezone based on GPS
+      route_timezone = "UTC"
+      start_lat = route.get('start_lat')
+      start_lng = route.get('start_lng')
+      if start_lat is not None and start_lng is not None:
+        try:
+          tz_name = tf.timezone_at(lng=start_lng, lat=start_lat)
+          if tz_name:
+            route_timezone = tz_name
+        except Exception as e:
+          logger.warning(f"Error determining timezone for route {route_name} at {start_lat}, {start_lng}: {e}")
+
       # Find which specific segments in this route are missing from DB
       new_segment_indices = []
       for i in route['segment_numbers']:
-        s_check = Segment(route_name, i, -1, -1, "")
+        s_check = Segment(route_name, i, -1, -1, "", route_timezone)
         if not db.segment_exists(s_check):
           new_segment_indices.append(i)
       
@@ -296,7 +312,8 @@ def GetSegments(start_time=None, end_time=None, check_db=CHECK_DATABASE, db_inst
                     i,
                     segment_start_time,
                     segment_end_time,
-                    download_urls[i]))
+                    download_urls[i],
+                    route_timezone))
   finally:
     if not db_instance:
       db.close()

@@ -7,7 +7,11 @@ from dataclasses import dataclass
 import time
 import sys
 import pathlib
-from datetime import datetime
+from datetime import datetime, timezone
+try:
+    from zoneinfo import ZoneInfo
+except ImportError:
+    from backports.zoneinfo import ZoneInfo
 
 # Named logger for the streamer
 logger = logging.getLogger('streamer')
@@ -21,6 +25,7 @@ class GenericSegment:
   start_time: int
   end_time: int
   download_url: str
+  timezone: str = "UTC"
 
   def unique_name(self):
     return self.route_name + "-" + str(self.segment_num)
@@ -81,7 +86,16 @@ class ClipsFifo:
             p = pathlib.Path(clip_file)
             # Use clip_file's directory
             text_clip = path.join(path.dirname(clip_file), f"{p.stem}-text{p.suffix}")
-            timestamp_str = datetime.fromtimestamp(segment.start_time / 1000).strftime(r'%Y-%m-%d %I\:%M %p')
+            
+            # Convert UTC timestamp to local timezone
+            dt_utc = datetime.fromtimestamp(segment.start_time / 1000, tz=timezone.utc)
+            try:
+                dt_local = dt_utc.astimezone(ZoneInfo(segment.timezone))
+            except Exception as e:
+                logger.warning(f"Error converting to timezone {segment.timezone}, falling back to UTC: {e}")
+                dt_local = dt_utc
+
+            timestamp_str = dt_local.strftime(r'%Y-%m-%d %I\:%M %p %Z')
             
             # This blocking call now happens in the background
             self.__write_text_video_func(clip_file, text_clip, timestamp_str, segment)
