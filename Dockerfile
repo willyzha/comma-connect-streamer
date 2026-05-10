@@ -22,7 +22,7 @@ RUN apt-get update && apt-get install -y \
     && rm -rf /var/lib/apt/lists/*
 
 # Install Python dependencies
-RUN pip install --no-cache-dir requests watchdog python-dotenv playwright timezonefinder
+RUN pip install --no-cache-dir requests watchdog python-dotenv playwright timezonefinder paho-mqtt
 
 # Set environment variables for Playwright
 ENV PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD=1

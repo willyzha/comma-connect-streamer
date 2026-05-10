@@ -52,11 +52,31 @@ if [ "$DISABLE_COMMA" != "true" ]; then
   COMMA_PID=$!
 fi
 
+# Use python to extract ENABLE_MQTT from .env
+ENABLE_MQTT=$(python3 -c "import os; from dotenv import load_dotenv; load_dotenv('/app/.env'); print(os.environ.get('ENABLE_MQTT', 'False'))")
+
+if [ "${ENABLE_MQTT,,}" = "true" ]; then
+  echo "Starting Comma MQTT script..."
+  python /app/comma_mqtt.py &
+  MQTT_PID=$!
+fi
+
+# Use python to extract ENABLE_TRACCAR from .env
+ENABLE_TRACCAR=$(python3 -c "import os; from dotenv import load_dotenv; load_dotenv('/app/.env'); print(os.environ.get('ENABLE_TRACCAR', 'False'))")
+
+if [ "${ENABLE_TRACCAR,,}" = "true" ]; then
+  echo "Starting Comma Traccar script..."
+  python /app/comma_traccar.py &
+  TRACCAR_PID=$!
+fi
+
 cleanup() {
     echo "Shutting down..."
     [ ! -z "$MEDIAMTX_PID" ] && kill $MEDIAMTX_PID
     [ ! -z "$COMMA_PID" ] && kill $COMMA_PID
-    wait $MEDIAMTX_PID $COMMA_PID 2>/dev/null
+    [ ! -z "$MQTT_PID" ] && kill $MQTT_PID
+    [ ! -z "$TRACCAR_PID" ] && kill $TRACCAR_PID
+    wait $MEDIAMTX_PID $COMMA_PID $MQTT_PID $TRACCAR_PID 2>/dev/null
     exit
 }
 

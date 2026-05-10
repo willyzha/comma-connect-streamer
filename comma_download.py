@@ -23,29 +23,14 @@ from timezonefinder import TimezoneFinder
 from fifo_streamer import ClipsFifo, GenericSegment
 
 from comma_auth import CommaAuth
+from comma_api import make_api_request, DONGLE_ID, auth, get_config
 
 # Load configuration from .env file if it exists
 # We check both the script directory and the current working directory
 load_dotenv(os.path.join(os.getcwd(), '.env'))
 load_dotenv(os.path.join(os.path.dirname(os.path.abspath(__file__)), '.env'))
 
-# Helper to get config with defaults and ENV overrides
-def get_config(key, fallback, type=str):
-    # Try environment variable first (load_dotenv makes .env vars available as env vars)
-    val = os.environ.get(key)
-    if val is not None:
-        if type == bool:
-            return val.lower() in ('true', '1', 't', 'y', 'yes')
-        if type == int:
-            try:
-              return int(val)
-            except ValueError:
-              return fallback
-        return val
-    return fallback
-
 # CONFIGS (with ENV/ .env overrides)
-DONGLE_ID = get_config('COMMA_DONGLE_ID', 'your_dongle_id_here')
 WRITE_TIMESTAMPS = get_config('WRITE_TIMESTAMPS', True, type=bool)
 DELETE_CLIPS = get_config('DELETE_CLIPS', True, type=bool)
 LOG_LEVEL_STR = get_config('LOG_LEVEL', 'INFO')
@@ -54,14 +39,6 @@ CHECK_DATABASE = get_config('CHECK_DATABASE', True, type=bool)
 STOP_AT_FIRST_PROCESSED = get_config('STOP_AT_FIRST_PROCESSED', True, type=bool)
 END_TIMEDELTA = timedelta(minutes=get_config('END_TIMEDELTA_MINUTES', 5, type=int))
 TIME_RANGE = timedelta(days=get_config('TIME_RANGE_DAYS', 3, type=int))
-
-# Initialize Auth
-auth = CommaAuth(
-    jwt_key=get_config('COMMA_JWT_KEY', None),
-    github_user=get_config('GITHUB_USER', None),
-    github_pass=get_config('GITHUB_PASS', None),
-    cache_path=get_config('JWT_CACHE_PATH', '/data/jwt.cache')
-)
 
 HTTP_REQUEST_RETRIES = get_config('HTTP_REQUEST_RETRIES', 10, type=int)
 DATABASE_PATH = get_config('DATABASE_PATH', '/config/comma_downloads.db')
@@ -88,45 +65,6 @@ logger = logging.getLogger('downloader')
 tf = TimezoneFinder()
 
 epoch = datetime.fromtimestamp(0, timezone.utc)
-
-# Configure a global requests session for connection pooling and retries
-api_session = requests.Session()
-retries = Retry(total=HTTP_REQUEST_RETRIES,
-                backoff_factor=1,
-                status_forcelist=[ 500, 502, 503, 504 ])
-api_session.mount('https://', HTTPAdapter(max_retries=retries))
-
-def make_api_request(url):
-    """Makes an authenticated GET request to the Comma API with robust error handling and auto-refresh."""
-    try:
-        response = api_session.get(url, headers={'Authorization': auth.token}, timeout=30)
-        response.raise_for_status()
-        return response.json()
-    except requests.exceptions.HTTPError as e:
-        status_code = e.response.status_code
-        if status_code == 401:
-            logger.error("AUTHENTICATION ERROR: Your JWT token is expired or invalid.")
-            if auth.handle_401():
-                try:
-                    # Retry once with the new token
-                    response = api_session.get(url, headers={'Authorization': auth.token}, timeout=30)
-                    response.raise_for_status()
-                    return response.json()
-                except Exception as retry_err:
-                    logger.error(f"Retry failed after JWT refresh: {retry_err}")
-        elif status_code == 403:
-            logger.error(f"PERMISSION ERROR: Access forbidden (403). Check if Dongle ID {DONGLE_ID} is correct and accessible with your token.")
-        elif status_code == 404:
-            logger.error(f"NOT FOUND: The requested resource was not found (404). URL: {url}")
-        else:
-            logger.error(f"HTTP error {status_code} occurred: {e}")
-        raise
-    except requests.exceptions.Timeout:
-        logger.error(f"TIMEOUT: The request to {url} timed out.")
-        raise
-    except requests.exceptions.RequestException as e:
-        logger.error(f"NETWORK ERROR: A connection error occurred: {e}")
-        raise
 
 
 @dataclass
