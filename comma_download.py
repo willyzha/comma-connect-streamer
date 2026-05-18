@@ -23,7 +23,7 @@ from timezonefinder import TimezoneFinder
 from fifo_streamer import ClipsFifo, GenericSegment
 
 from comma_auth import CommaAuth
-from comma_api import make_api_request, DONGLE_ID, auth, get_config
+from comma_api import make_api_request, DONGLE_ID, auth, get_config, api_session
 
 # Load configuration from .env file if it exists
 # We check both the script directory and the current working directory
