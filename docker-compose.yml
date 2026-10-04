@@ -11,7 +11,6 @@ services:
       - "8889:8889"  # WebRTC
       - "1935:1935"  # RTMP
     environment:
-      - COMMA_JWT_KEY=JWT your_jwt_key_here
       - DISABLE_COMMA=false
     volumes:
       - ./data:/data

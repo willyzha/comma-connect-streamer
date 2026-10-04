@@ -3,8 +3,10 @@ import time
 import json
 import base64
 import os
-from datetime import datetime, timedelta, UTC
-from automate_login import get_jwt_via_playwright
+try:
+    from automate_login import get_jwt_via_playwright
+except ImportError:
+    get_jwt_via_playwright = None
 
 logger = logging.getLogger('comma_auth')
 
@@ -47,17 +49,23 @@ class CommaAuth:
                 if self.github_user and self.github_pass:
                     logger.info("No valid token with sufficient remaining life found. Triggering startup JWT refresh...")
                     self.refresh()
-                else:
-                    # Fallback to whatever we have if automation isn't possible, 
-                    # even if it's near expiry.
+                
+                # If refresh failed or wasn't configured, fallback to existing token
+                if not self._jwt_key:
                     self._jwt_key = env_token or cached_token
-                    if not self._jwt_key:
-                        logger.warning("No token found and no GitHub credentials provided.")
+                
+                if not self._jwt_key:
+                    logger.warning("No token found and no GitHub credentials provided.")
 
     def _format_token(self, token):
-        if token and token != 'your_jwt_key_here' and not token.startswith('JWT '):
+        if not token:
+            return None
+        token = token.strip()
+        if token in ('your_jwt_key_here', 'JWT your_jwt_key_here'):
+            return None
+        if not token.startswith('JWT '):
             return f"JWT {token}"
-        return token if token != 'your_jwt_key_here' else None
+        return token
 
     def is_token_expired(self, token, buffer_seconds=300):
         """Checks if a JWT is expired or within the buffer period."""
@@ -108,6 +116,9 @@ class CommaAuth:
     def refresh(self):
         """Fetches a new JWT token from https://jwt.comma.ai/ via Playwright automation."""
         if self.github_user and self.github_pass:
+            if not get_jwt_via_playwright:
+                logger.warning("Playwright is not installed. Automated login unavailable.")
+                return False
             logger.info("Refreshing JWT token via Playwright automation...")
             start_time = time.time()
             new_jwt = get_jwt_via_playwright(self.github_user, self.github_pass)

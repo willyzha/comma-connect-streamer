@@ -2,7 +2,7 @@ import time
 import logging
 import os
 import requests
-from comma_api import make_api_request, DONGLE_ID, get_config
+from comma_api import make_api_request, get_device_location, DONGLE_ID, get_config
 
 # Configure logging
 LOG_LEVEL_STR = get_config('LOG_LEVEL', 'INFO')
@@ -20,12 +20,7 @@ TRACCAR_DEVICE_ID = get_config('TRACCAR_DEVICE_ID', DONGLE_ID)
 POLL_INTERVAL = get_config('LOCATION_POLL_INTERVAL', 60, type=int)
 
 def get_location():
-    url = f"https://api.commadotai.com/v1/devices/{DONGLE_ID}/location"
-    try:
-        return make_api_request(url)
-    except Exception as e:
-        logger.error(f"Error fetching location from Comma API: {e}")
-        return None
+    return get_device_location()
 
 def send_to_traccar(location):
     """Sends location data to Traccar using the OsmAnd protocol (HTTP GET)."""

@@ -2,8 +2,11 @@ import time
 import json
 import logging
 import os
-import paho.mqtt.client as mqtt
-from comma_api import make_api_request, DONGLE_ID, get_config
+try:
+    import paho.mqtt.client as mqtt
+except ImportError:
+    mqtt = None
+from comma_api import make_api_request, get_device_location, DONGLE_ID, get_config
 
 # Configure logging
 LOG_LEVEL_STR = get_config('LOG_LEVEL', 'INFO')
@@ -56,14 +59,13 @@ def publish_discovery(client):
     logger.info(f"Published discovery topic: {discovery_topic}")
 
 def get_location():
-    url = f"https://api.commadotai.com/v1/devices/{DONGLE_ID}/location"
-    try:
-        return make_api_request(url)
-    except Exception as e:
-        logger.error(f"Error fetching location: {e}")
-        return None
+    return get_device_location()
 
 def main():
+    if mqtt is None:
+        logger.error("paho-mqtt is not installed. Please install paho-mqtt to use MQTT.")
+        return
+
     if not DONGLE_ID or DONGLE_ID == 'your_dongle_id_here':
         logger.error("COMMA_DONGLE_ID not set. Exiting.")
         return

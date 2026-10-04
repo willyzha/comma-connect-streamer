@@ -37,7 +37,7 @@ LOG_LEVEL_STR = get_config('LOG_LEVEL', 'INFO')
 LOG_LEVEL = getattr(logging, LOG_LEVEL_STR.upper(), logging.INFO)
 CHECK_DATABASE = get_config('CHECK_DATABASE', True, type=bool)
 STOP_AT_FIRST_PROCESSED = get_config('STOP_AT_FIRST_PROCESSED', True, type=bool)
-END_TIMEDELTA = timedelta(minutes=get_config('END_TIMEDELTA_MINUTES', 5, type=int))
+END_TIMEDELTA = timedelta(minutes=get_config('END_TIMEDELTA_MINUTES', 2, type=int))
 TIME_RANGE = timedelta(days=get_config('TIME_RANGE_DAYS', 3, type=int))
 
 HTTP_REQUEST_RETRIES = get_config('HTTP_REQUEST_RETRIES', 10, type=int)
@@ -362,13 +362,13 @@ def main():
             logger.warning(f"Processing loop has been running for 45 minutes, breaking to refresh segment list.")
             break
 
-        # If it's been more than 10min since the last new segment reduce the polling freq to 5min
+        # If it's been more than 10min since the last new segment reduce the polling freq to 1min
         if datetime.now(UTC) - latest_segment_time > timedelta(minutes=10):
-          logger.debug("No new segments found in 10 minutes. Lowering polling frequency to 5 minutes.")
-          sleep_s = 60 * 5
+          logger.debug("No new segments found in 10 minutes. Lowering polling frequency to 1 minute.")
+          sleep_s = 60
           db.cleanup()
         else:
-          sleep_s = 30
+          sleep_s = 20
       except Exception as e:
         logger.error(f"Error in polling loop: {e}")
         # traceback.print_exc() # Keep logging but don't exit
