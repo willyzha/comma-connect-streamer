@@ -62,13 +62,15 @@ def get_location():
     return get_device_location()
 
 def main():
+    global DONGLE_ID
     if mqtt is None:
         logger.error("paho-mqtt is not installed. Please install paho-mqtt to use MQTT.")
         return
 
-    if not DONGLE_ID or DONGLE_ID == 'your_dongle_id_here':
-        logger.error("COMMA_DONGLE_ID not set. Exiting.")
-        return
+    while not DONGLE_ID or DONGLE_ID == 'your_dongle_id_here':
+        logger.error("COMMA_DONGLE_ID not configured. Set COMMA_DONGLE_ID in /config/.env or container environment variables. Checking again in 60s...")
+        time.sleep(60)
+        DONGLE_ID = get_config('COMMA_DONGLE_ID', 'your_dongle_id_here')
 
     client = mqtt.Client()
     if MQTT_USER and MQTT_PASS:

@@ -54,9 +54,12 @@ def send_to_traccar(location):
         return False
 
 def main():
-    if not DONGLE_ID or DONGLE_ID == 'your_dongle_id_here':
-        logger.error("COMMA_DONGLE_ID not set. Exiting.")
-        return
+    global DONGLE_ID, TRACCAR_DEVICE_ID
+    while not DONGLE_ID or DONGLE_ID == 'your_dongle_id_here':
+        logger.error("COMMA_DONGLE_ID not configured. Set COMMA_DONGLE_ID in /config/.env or container environment variables. Checking again in 60s...")
+        time.sleep(60)
+        DONGLE_ID = get_config('COMMA_DONGLE_ID', 'your_dongle_id_here')
+        TRACCAR_DEVICE_ID = get_config('TRACCAR_DEVICE_ID', DONGLE_ID)
 
     logger.info(f"Starting Traccar location uploader for device {TRACCAR_DEVICE_ID} to {TRACCAR_URL}")
 

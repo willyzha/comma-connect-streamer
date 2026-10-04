@@ -5,21 +5,49 @@ from comma_auth import CommaAuth
 import os
 import time
 from datetime import datetime
-from dotenv import load_dotenv
+from dotenv import load_dotenv, dotenv_values
 
-# Load configuration
-load_dotenv(os.path.join(os.getcwd(), '.env'), override=True)
-load_dotenv(os.path.join(os.path.dirname(os.path.abspath(__file__)), '.env'), override=True)
+# Load configuration without destructive override
+load_dotenv(os.path.join(os.getcwd(), '.env'))
+load_dotenv(os.path.join(os.path.dirname(os.path.abspath(__file__)), '.env'))
+if os.path.exists('/config/.env'):
+    load_dotenv('/config/.env')
+
+PLACEHOLDERS = {'your_dongle_id_here', 'your_jwt_key_here', 'JWT your_jwt_key_here', 'your_password', 'your_device_id'}
+
+def is_valid_val(v):
+    return v is not None and str(v).strip() != '' and str(v).strip() not in PLACEHOLDERS
 
 def get_config(key, fallback, type=str):
     val = os.environ.get(key)
-    if val is not None:
+    # If os.environ doesn't have a valid value (or has a placeholder), check .env files directly
+    if not is_valid_val(val):
+        candidates = [
+            '/config/.env',
+            os.path.join(os.getcwd(), '.env'),
+            os.path.join(os.path.dirname(os.path.abspath(__file__)), '.env'),
+            os.path.join(os.path.dirname(os.path.abspath(__file__)), 'config', '.env')
+        ]
+        for env_path in candidates:
+            if os.path.isfile(env_path):
+                try:
+                    file_vals = dotenv_values(env_path)
+                    file_val = file_vals.get(key)
+                    if is_valid_val(file_val):
+                        val = file_val
+                        break
+                except Exception:
+                    pass
+
+    if is_valid_val(val):
+        val = str(val).strip()
         if type == bool:
             return val.lower() in ('true', '1', 't', 'y', 'yes')
         if type == int:
             try: return int(val)
             except ValueError: return fallback
         return val
+
     return fallback
 
 DONGLE_ID = get_config('COMMA_DONGLE_ID', 'your_dongle_id_here')

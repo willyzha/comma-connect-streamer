@@ -72,14 +72,15 @@ fi
 
 cleanup() {
     echo "Shutting down..."
-    [ ! -z "$MEDIAMTX_PID" ] && kill $MEDIAMTX_PID
-    [ ! -z "$COMMA_PID" ] && kill $COMMA_PID
-    [ ! -z "$MQTT_PID" ] && kill $MQTT_PID
-    [ ! -z "$TRACCAR_PID" ] && kill $TRACCAR_PID
+    [ ! -z "$MEDIAMTX_PID" ] && kill $MEDIAMTX_PID 2>/dev/null
+    [ ! -z "$COMMA_PID" ] && kill $COMMA_PID 2>/dev/null
+    [ ! -z "$MQTT_PID" ] && kill $MQTT_PID 2>/dev/null
+    [ ! -z "$TRACCAR_PID" ] && kill $TRACCAR_PID 2>/dev/null
     wait $MEDIAMTX_PID $COMMA_PID $MQTT_PID $TRACCAR_PID 2>/dev/null
     exit
 }
 
 trap cleanup SIGINT SIGTERM
-wait -n
+# Wait for the primary streaming server process (MediaMTX)
+wait $MEDIAMTX_PID
 cleanup
