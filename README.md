@@ -1,6 +1,12 @@
-# Comma Connect Streamer
-
-Download driving clips and track vehicle location from Comma.ai / openpilot devices, streaming video via RTSP (MediaMTX) and publishing location data to Traccar and Home Assistant MQTT.
+<div align="center">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="assets/icon-dark.png">
+    <source media="(prefers-color-scheme: light)" srcset="assets/icon.png">
+    <img alt="Comma Connect Streamer" src="assets/icon.png" width="120" height="120">
+  </picture>
+  <h1>Comma Connect Streamer</h1>
+  <p>Download driving clips and track vehicle location from Comma.ai / openpilot devices, streaming video via RTSP (MediaMTX) and publishing location data to Traccar and Home Assistant MQTT.</p>
+</div>
 
 ## Features
 
@@ -23,7 +29,8 @@ Download driving clips and track vehicle location from Comma.ai / openpilot devi
 │   ├── comma_mqtt.py       # Home Assistant MQTT location publisher
 │   └── comma_traccar.py    # Traccar OsmAnd protocol location publisher
 ├── assets/                 # Project assets and video clip fallbacks
-│   ├── icon.png            # Project icon (transparent square PNG)
+│   ├── icon.png            # Project icon for light mode (black comma with white play button)
+│   ├── icon-dark.png       # Project icon for dark mode (white comma with dark play button)
 │   ├── icon.svg            # Scalable vector icon source
 │   ├── loading.ts          # Transition clip played while loading new drives
 │   └── offline.ts          # Looping clip played when no drives are active
