@@ -22,7 +22,9 @@ Download driving clips and track vehicle location from Comma.ai / openpilot devi
 │   ├── fifo_streamer.py    # FIFO queue and video transition streamer
 │   ├── comma_mqtt.py       # Home Assistant MQTT location publisher
 │   └── comma_traccar.py    # Traccar OsmAnd protocol location publisher
-├── assets/                 # Video clip fallback assets
+├── assets/                 # Project assets and video clip fallbacks
+│   ├── icon.png            # Project icon (transparent square PNG)
+│   ├── icon.svg            # Scalable vector icon source
 │   ├── loading.ts          # Transition clip played while loading new drives
 │   └── offline.ts          # Looping clip played when no drives are active
 ├── docker/                 # Container runtime configurations
