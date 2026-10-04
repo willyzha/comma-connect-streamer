@@ -5,15 +5,15 @@
     <img alt="Comma Connect Streamer" src="assets/icon.png" width="120" height="120">
   </picture>
   <h1>Comma Connect Streamer</h1>
-  <p>Download driving clips and track vehicle location from Comma.ai / openpilot devices, streaming video via RTSP (MediaMTX) and publishing location data to Traccar and Home Assistant MQTT.</p>
+  <p>Download driving clips and track vehicle location from Comma.ai / openpilot devices, streaming video via RTSP (MediaMTX) and publishing live GPS tracking directly to Home Assistant via MQTT.</p>
 </div>
 
 ## Features
 
 - **RTSP Video Stream**: Continuously streams recent dashcam clips via MediaMTX and Linux FIFOs with seamless fallback to "Offline" and "Loading" screens.
 - **HUD Overlays**: Burn-in timestamps and route metadata directly onto the video stream.
-- **Traccar Integration**: Publishes vehicle location to Traccar using OsmAnd HTTP protocol with multi-tiered fallback (Athena RPC, cached GPS, and parked route coordinates).
-- **Home Assistant MQTT**: Publishes MQTT auto-discovery device tracker for Home Assistant.
+- **Home Assistant MQTT Device Tracker**: Native GPS tracker with auto-discovery, interactive map positioning, zone tracking (`home` / `not_home`), live speed, bearing, and location source diagnostics.
+- **Multi-Tiered GPS Fallback**: Seamlessly resolves location using live Athena RPC, cached device GPS, or parked coordinates from the latest drive.
 - **Dockerized**: Easy single-container deployment with pre-built multi-service supervisor.
 
 ## Repository Structure
@@ -26,8 +26,7 @@
 │   ├── automate_login.py   # Headless browser token renewal automation
 │   ├── comma_download.py   # Video segment downloader and processing loop
 │   ├── fifo_streamer.py    # FIFO queue and video transition streamer
-│   ├── comma_mqtt.py       # Home Assistant MQTT location publisher
-│   └── comma_traccar.py    # Traccar OsmAnd protocol location publisher
+│   └── comma_mqtt.py       # Home Assistant MQTT location & sensor publisher
 ├── assets/                 # Project assets and video clip fallbacks
 │   ├── icon.png            # Project icon for light mode (black comma with white play button)
 │   ├── icon-dark.png       # Project icon for dark mode (white comma with dark play button)
@@ -66,24 +65,24 @@ Open VLC, ffplay, or any RTSP client and connect to:
 * **HLS**: `http://<server-ip>:8888/comma_dashcam`
 * **WebRTC**: `http://<server-ip>:8889/comma_dashcam`
 
-## Optional Integrations
+## Home Assistant MQTT Integration
 
-### Traccar GPS Publishing
-Enable Traccar integration in `.env`:
-```ini
-ENABLE_TRACCAR=True
-TRACCAR_URL=http://your-traccar-server:5055
-TRACCAR_DEVICE_ID=your_device_id
-```
+The streamer directly publishes to Home Assistant using **MQTT Auto-Discovery**. Home Assistant will automatically create a device card under **Settings > Devices & Services > MQTT** containing:
+* **Device Tracker** (`device_tracker.comma_<dongle_id>`): Displays live vehicle position on the Home Assistant map and automatically calculates zone entry/exit (`home`, `work`, `not_home`).
+* **Vehicle Speed Sensor** (`sensor.comma_<dongle_id>_speed`): Real-time speed with configurable units (`km/h`, `mph`, `m/s`).
+* **Location Source Sensor** (`sensor.comma_<dongle_id>_source`): Diagnostic sensor showing GPS source (`athena_live`, `device_cached`, or `last_route_parked`).
+* **Bearing Sensor** (`sensor.comma_<dongle_id>_bearing`): Compass heading in degrees.
+* **Availability Tracking**: Uses MQTT Last Will and Testament (LWT) to mark entities as online/offline automatically.
 
-### Home Assistant MQTT
-Enable MQTT integration in `.env`:
+### Enabling MQTT in `.env`:
 ```ini
 ENABLE_MQTT=True
 MQTT_HOST=192.168.1.100
 MQTT_PORT=1883
 MQTT_USER=homeassistant
-MQTT_PASSWORD=your_password
+MQTT_PASSWORD=your_mqtt_password
+MQTT_SPEED_UNIT=km/h
+LOCATION_POLL_INTERVAL=60
 ```
 
 ## Environment Variables
@@ -95,10 +94,12 @@ MQTT_PASSWORD=your_password
 | `WRITE_TIMESTAMPS` | `True` | Burn-in timestamps and route info on stream |
 | `DISABLE_COMMA` | `False` | Disable driving clip downloader |
 | `TIME_RANGE_DAYS` | `3` | How many days back to search for driving clips |
-| `ENABLE_TRACCAR` | `False` | Enable Traccar location publisher |
-| `TRACCAR_URL` | `http://localhost:5055` | Traccar server OsmAnd endpoint |
-| `ENABLE_MQTT` | `False` | Enable Home Assistant MQTT publisher |
+| `ENABLE_MQTT` | `False` | Enable Home Assistant MQTT device tracker & sensors |
 | `MQTT_HOST` | `localhost` | MQTT broker hostname / IP |
+| `MQTT_PORT` | `1883` | MQTT broker port |
+| `MQTT_USER` | None | MQTT broker username (optional) |
+| `MQTT_PASSWORD` | None | MQTT broker password (optional) |
+| `MQTT_SPEED_UNIT` | `km/h` | Speed sensor unit (`km/h`, `mph`, `m/s`) |
 | `LOCATION_POLL_INTERVAL` | `60` | Location polling interval in seconds |
 | `LOADING_PATH` | `/app/assets/loading.ts` | Path to loading video screen |
 | `OFFLINE_PATH` | `/app/assets/offline.ts` | Path to offline video screen |

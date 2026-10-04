@@ -2,10 +2,13 @@ import time
 import json
 import logging
 import os
+from datetime import datetime, timezone
+
 try:
     import paho.mqtt.client as mqtt
 except ImportError:
     mqtt = None
+
 from comma_api import make_api_request, get_device_location, DONGLE_ID, get_config
 
 # Configure logging
@@ -26,40 +29,115 @@ MQTT_PASS = get_config('MQTT_PASSWORD', None)
 MQTT_DISCOVERY_PREFIX = get_config('MQTT_DISCOVERY_PREFIX', 'homeassistant')
 MQTT_STATE_PREFIX = get_config('MQTT_STATE_PREFIX', 'comma')
 POLL_INTERVAL = get_config('LOCATION_POLL_INTERVAL', 60, type=int)
+SPEED_UNIT = get_config('MQTT_SPEED_UNIT', 'km/h').lower()
 
-def on_connect(client, userdata, flags, rc):
+
+def on_connect(client, userdata, flags, rc, *args):
     if rc == 0:
-        logger.info("Connected to MQTT Broker!")
+        logger.info("Connected to MQTT Broker successfully.")
         publish_discovery(client)
+        status_topic = f"{MQTT_STATE_PREFIX}/{DONGLE_ID}/status"
+        client.publish(status_topic, "online", retain=True)
     else:
-        logger.error(f"Failed to connect, return code {rc}")
+        logger.error(f"Failed to connect to MQTT Broker, return code {rc}")
+
 
 def publish_discovery(client):
+    """Publishes Home Assistant MQTT Auto-Discovery configurations."""
     device_id = f"comma_{DONGLE_ID}"
-    discovery_topic = f"{MQTT_DISCOVERY_PREFIX}/device_tracker/{device_id}/config"
-    
-    payload = {
-        "state_topic": f"{MQTT_STATE_PREFIX}/{DONGLE_ID}/location",
+    status_topic = f"{MQTT_STATE_PREFIX}/{DONGLE_ID}/status"
+    attr_topic = f"{MQTT_STATE_PREFIX}/{DONGLE_ID}/attributes"
+
+    device_info = {
+        "identifiers": [device_id],
         "name": f"Comma {DONGLE_ID}",
+        "model": "comma 3 / 3X",
+        "manufacturer": "comma.ai"
+    }
+
+    # 1. Device Tracker (GPS Location)
+    # Note: Omit state_topic so Home Assistant automatically computes zones (home/not_home)
+    # based on the latitude/longitude provided in json_attributes_topic.
+    tracker_config_topic = f"{MQTT_DISCOVERY_PREFIX}/device_tracker/{device_id}/config"
+    tracker_payload = {
+        "name": "Location",
         "unique_id": f"{device_id}_tracker",
-        "device": {
-            "identifiers": [device_id],
-            "name": f"Comma {DONGLE_ID}",
-            "model": "comma 3",
-            "manufacturer": "comma.ai"
-        },
-        "json_attributes_topic": f"{MQTT_STATE_PREFIX}/{DONGLE_ID}/attributes",
+        "device": device_info,
+        "json_attributes_topic": attr_topic,
+        "source_type": "gps",
+        "availability_topic": status_topic,
         "payload_available": "online",
         "payload_not_available": "offline",
-        "availability_topic": f"{MQTT_STATE_PREFIX}/{DONGLE_ID}/status",
-        "source_type": "gps"
+        "icon": "mdi:car-connected"
     }
-    
-    client.publish(discovery_topic, json.dumps(payload), retain=True)
-    logger.info(f"Published discovery topic: {discovery_topic}")
+    client.publish(tracker_config_topic, json.dumps(tracker_payload), retain=True)
+    logger.info(f"Published Home Assistant device tracker discovery: {tracker_config_topic}")
+
+    # 2. Speed Sensor
+    if SPEED_UNIT == 'mph':
+        speed_template = "{{ (value_json.speed * 2.23694) | round(1) if value_json.speed is not none else 0 }}"
+        unit_str = "mph"
+    elif SPEED_UNIT == 'm/s':
+        speed_template = "{{ value_json.speed | round(1) if value_json.speed is not none else 0 }}"
+        unit_str = "m/s"
+    else:
+        speed_template = "{{ (value_json.speed * 3.6) | round(1) if value_json.speed is not none else 0 }}"
+        unit_str = "km/h"
+
+    speed_config_topic = f"{MQTT_DISCOVERY_PREFIX}/sensor/{device_id}_speed/config"
+    speed_payload = {
+        "name": "Speed",
+        "unique_id": f"{device_id}_speed",
+        "device": device_info,
+        "state_topic": attr_topic,
+        "value_template": speed_template,
+        "unit_of_measurement": unit_str,
+        "device_class": "speed",
+        "state_class": "measurement",
+        "icon": "mdi:speedometer",
+        "availability_topic": status_topic,
+        "payload_available": "online",
+        "payload_not_available": "offline"
+    }
+    client.publish(speed_config_topic, json.dumps(speed_payload), retain=True)
+
+    # 3. Location Source Diagnostic Sensor
+    source_config_topic = f"{MQTT_DISCOVERY_PREFIX}/sensor/{device_id}_source/config"
+    source_payload = {
+        "name": "Location Source",
+        "unique_id": f"{device_id}_source",
+        "device": device_info,
+        "state_topic": attr_topic,
+        "value_template": "{{ value_json.source if value_json.source is not none else 'unknown' }}",
+        "icon": "mdi:crosshairs-gps",
+        "entity_category": "diagnostic",
+        "availability_topic": status_topic,
+        "payload_available": "online",
+        "payload_not_available": "offline"
+    }
+    client.publish(source_config_topic, json.dumps(source_payload), retain=True)
+
+    # 4. Compass Bearing Diagnostic Sensor
+    bearing_config_topic = f"{MQTT_DISCOVERY_PREFIX}/sensor/{device_id}_bearing/config"
+    bearing_payload = {
+        "name": "Bearing",
+        "unique_id": f"{device_id}_bearing",
+        "device": device_info,
+        "state_topic": attr_topic,
+        "value_template": "{{ value_json.bearing | round(0) if value_json.bearing is not none else 0 }}",
+        "unit_of_measurement": "°",
+        "icon": "mdi:compass",
+        "entity_category": "diagnostic",
+        "availability_topic": status_topic,
+        "payload_available": "online",
+        "payload_not_available": "offline"
+    }
+    client.publish(bearing_config_topic, json.dumps(bearing_payload), retain=True)
+
 
 def get_location():
     return get_device_location()
+
 
 def main():
     global DONGLE_ID
@@ -72,68 +150,69 @@ def main():
         time.sleep(60)
         DONGLE_ID = get_config('COMMA_DONGLE_ID', 'your_dongle_id_here')
 
-    client = mqtt.Client()
+    # Initialize MQTT client with compatibility across paho-mqtt v1 and v2
+    try:
+        client = mqtt.Client(mqtt.CallbackAPIVersion.VERSION1)
+    except AttributeError:
+        client = mqtt.Client()
+
     if MQTT_USER and MQTT_PASS:
         client.username_pw_set(MQTT_USER, MQTT_PASS)
-    
+
     client.on_connect = on_connect
-    
-    # Set Will for availability
+
+    # Configure Last Will and Testament (LWT) for availability tracking
     status_topic = f"{MQTT_STATE_PREFIX}/{DONGLE_ID}/status"
     client.will_set(status_topic, "offline", retain=True)
 
+    logger.info(f"Connecting to MQTT Broker at {MQTT_HOST}:{MQTT_PORT}...")
     try:
         client.connect(MQTT_HOST, MQTT_PORT, 60)
     except Exception as e:
-        logger.error(f"Could not connect to MQTT Broker: {e}")
+        logger.error(f"Could not connect to MQTT Broker at {MQTT_HOST}:{MQTT_PORT}: {e}")
         return
 
     client.loop_start()
 
-    # Mark as online
-    client.publish(status_topic, "online", retain=True)
+    attr_topic = f"{MQTT_STATE_PREFIX}/{DONGLE_ID}/attributes"
 
     try:
         while True:
             location = get_location()
             if location:
-                # Device Tracker state topic expects a JSON with latitude, longitude, etc.
-                # or it can be configured to parse from attributes. 
-                # For Home Assistant MQTT device_tracker, if we use a single topic for state,
-                # we can send a JSON payload.
-                state_topic = f"{MQTT_STATE_PREFIX}/{DONGLE_ID}/location"
-                attr_topic = f"{MQTT_STATE_PREFIX}/{DONGLE_ID}/attributes"
-                
-                # GPS data
                 lat = location.get('lat')
                 lng = location.get('lng')
-                
+
                 if lat is not None and lng is not None:
-                    # Home Assistant expects 'latitude', 'longitude', and 'gps_accuracy' in the attributes
-                    # for the device_tracker to update its location.
-                    ha_attributes = location.copy()
-                    ha_attributes['latitude'] = lat
-                    ha_attributes['longitude'] = lng
-                    ha_attributes['gps_accuracy'] = location.get('accuracy', 0)
-                    
-                    # Update attributes (where HA gets the coordinates)
-                    client.publish(attr_topic, json.dumps(ha_attributes))
-                    
-                    # Update state (can be anything, but we'll use a summary or just 'online')
-                    state_topic = f"{MQTT_STATE_PREFIX}/{DONGLE_ID}/location"
-                    client.publish(state_topic, "online")
-                    
-                    logger.info(f"Updated location: {lat}, {lng}")
+                    # Home Assistant device_tracker expects 'latitude', 'longitude', and 'gps_accuracy'
+                    ha_attributes = {
+                        "latitude": lat,
+                        "longitude": lng,
+                        "gps_accuracy": location.get('accuracy', 15),
+                        "altitude": location.get('altitude', 0),
+                        "speed": location.get('speed', 0),
+                        "bearing": location.get('bearing', 0),
+                        "source": location.get('source', 'unknown'),
+                        "dongle_id": DONGLE_ID,
+                        "last_updated": datetime.now(timezone.utc).isoformat()
+                    }
+
+                    # Publish retained JSON attributes so HA updates GPS pin and zone immediately
+                    client.publish(attr_topic, json.dumps(ha_attributes), retain=True)
+                    logger.info(f"Published location to MQTT: lat={lat}, lng={lng}, source={location.get('source')} (interval: {POLL_INTERVAL}s)")
                 else:
-                    logger.warning("Location data received but missing lat/lng.")
-            
+                    logger.warning("Location data received from Comma API but lat/lng were empty.")
+            else:
+                logger.debug("No location data available in this polling cycle.")
+
             time.sleep(POLL_INTERVAL)
     except KeyboardInterrupt:
-        logger.info("Stopping...")
+        logger.info("Stopping comma_mqtt...")
     finally:
         client.publish(status_topic, "offline", retain=True)
         client.loop_stop()
         client.disconnect()
+
 
 if __name__ == "__main__":
     main()
