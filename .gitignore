@@ -12,8 +12,8 @@ data/
 *.mp4
 *.ts
 *.slow.*
-!loading.ts
-!offline.ts
+!assets/loading.ts
+!assets/offline.ts
 
 # --- Test Artifacts ---
 output.*

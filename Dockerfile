@@ -22,12 +22,13 @@ RUN apt-get update && apt-get install -y \
     && rm -rf /var/lib/apt/lists/*
 
 # Install Python dependencies
-RUN pip install --no-cache-dir requests watchdog python-dotenv playwright timezonefinder paho-mqtt
+COPY requirements.txt /app/requirements.txt
+RUN pip install --no-cache-dir -r /app/requirements.txt
 
-# Set environment variables for Playwright
+# Set environment variables for Playwright & Python
 ENV PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD=1
 ENV PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH=/usr/bin/chromium
-
+ENV PYTHONPATH=/app/src:/app
 
 # Set working directory
 WORKDIR /app
@@ -35,13 +36,15 @@ WORKDIR /app
 # Copy MediaMTX from downloader
 COPY --from=downloader /tmp/mediamtx /usr/local/bin/mediamtx
 
-# Copy project files (this includes your custom mediamtx.yml, config files, and scripts)
+# Copy project files
 COPY . .
 
-# Set environment variables for config.ini defaults
+# Set environment variables for defaults
 ENV FFMPEG_PATH=/usr/bin/ffmpeg
 ENV DOWNLOAD_PATH=/data
 ENV FIFO_PATH=/dev/shm/new_clip.fifo
+ENV LOADING_PATH=/app/assets/loading.ts
+ENV OFFLINE_PATH=/app/assets/offline.ts
 
 # Create necessary directories
 RUN mkdir -p /data/dashcam/clips /config
@@ -50,6 +53,6 @@ RUN mkdir -p /data/dashcam/clips /config
 EXPOSE 8554 1935 8888 8889
 
 # Entrypoint script
-RUN chmod +x /app/docker-start.sh
+RUN chmod +x /app/docker/docker-start.sh
 
-CMD ["/app/docker-start.sh"]
+CMD ["/app/docker/docker-start.sh"]

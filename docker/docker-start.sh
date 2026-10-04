@@ -48,7 +48,7 @@ sleep 2
 
 if [ "$DISABLE_COMMA" != "true" ]; then
   echo "Starting Comma Download script..."
-  python /app/comma_download.py &
+  python /app/src/comma_download.py &
   COMMA_PID=$!
 fi
 
@@ -57,7 +57,7 @@ ENABLE_MQTT=$(python3 -c "import os; from dotenv import load_dotenv; load_dotenv
 
 if [ "${ENABLE_MQTT,,}" = "true" ]; then
   echo "Starting Comma MQTT script..."
-  python /app/comma_mqtt.py &
+  python /app/src/comma_mqtt.py &
   MQTT_PID=$!
 fi
 
@@ -66,7 +66,7 @@ ENABLE_TRACCAR=$(python3 -c "import os; from dotenv import load_dotenv; load_dot
 
 if [ "${ENABLE_TRACCAR,,}" = "true" ]; then
   echo "Starting Comma Traccar script..."
-  python /app/comma_traccar.py &
+  python /app/src/comma_traccar.py &
   TRACCAR_PID=$!
 fi
 

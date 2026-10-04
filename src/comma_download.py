@@ -47,8 +47,12 @@ DOWNLOAD_PATH = get_config('DOWNLOAD_PATH', '/dev/shm/dashcam/clips')
 FFMPEG_PATH = get_config('FFMPEG_PATH', '/usr/bin/ffmpeg')
 FONT_PATH = get_config('FONT_PATH', '/usr/share/fonts/roboto/Roboto-Thin.ttf')
 FONT_SIZE = get_config('FONT_SIZE', 12, type=int)
-LOADING_PATH = get_config('LOADING_PATH', '/app/loading.ts')
-OFFLINE_PATH = get_config('OFFLINE_PATH', '/app/offline.ts')
+_root_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+_default_loading = os.path.join(_root_dir, 'assets', 'loading.ts') if os.path.exists(os.path.join(_root_dir, 'assets', 'loading.ts')) else '/app/assets/loading.ts'
+_default_offline = os.path.join(_root_dir, 'assets', 'offline.ts') if os.path.exists(os.path.join(_root_dir, 'assets', 'offline.ts')) else '/app/assets/offline.ts'
+
+LOADING_PATH = get_config('LOADING_PATH', _default_loading)
+OFFLINE_PATH = get_config('OFFLINE_PATH', _default_offline)
 
 # Initialize logging globally
 logging.basicConfig(

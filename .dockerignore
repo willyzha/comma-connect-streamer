@@ -17,8 +17,8 @@ SHA256SUMS.*
 output.*
 test_loading.mp4
 # Keep assets we need
-!loading.ts
-!offline.ts
+!assets/loading.ts
+!assets/offline.ts
 !nest_loading.mp4
 !nest_offline.mp4
 !Roboto-*.ttf
