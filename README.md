@@ -16,33 +16,6 @@
 - **Multi-Tiered GPS Fallback**: Seamlessly resolves location using live Athena RPC, cached device GPS, or parked coordinates from the latest drive.
 - **Dockerized**: Easy single-container deployment with pre-built multi-service supervisor.
 
-## Repository Structure
-
-```
-├── src/                    # Python application modules
-│   ├── __init__.py
-│   ├── comma_api.py        # Comma API client and multi-tiered location resolver
-│   ├── comma_auth.py       # JWT authentication and caching manager
-│   ├── automate_login.py   # Headless browser token renewal automation
-│   ├── comma_download.py   # Video segment downloader and processing loop
-│   ├── fifo_streamer.py    # FIFO queue and video transition streamer
-│   └── comma_mqtt.py       # Home Assistant MQTT location & sensor publisher
-├── assets/                 # Project assets and video clip fallbacks
-│   ├── icon.png            # Project icon for light mode (black comma with white play button)
-│   ├── icon-dark.png       # Project icon for dark mode (white comma with dark play button)
-│   ├── icon.svg            # Scalable vector icon source
-│   ├── loading.ts          # Transition clip played while loading new drives
-│   └── offline.ts          # Looping clip played when no drives are active
-├── docker/                 # Container runtime configurations
-│   ├── docker-start.sh     # Container multi-process entrypoint script
-│   └── mediamtx.yml        # MediaMTX RTSP/WebRTC/HLS/RTMP server configuration
-├── .env.example            # Configuration template
-├── Dockerfile              # Container image build definition
-├── docker-compose.yml      # Docker Compose deployment definition
-├── requirements.txt        # Python package dependencies
-└── README.md
-```
-
 ## Quick Start
 
 ### 1. Configure Environment
