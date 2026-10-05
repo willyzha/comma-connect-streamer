@@ -30,6 +30,7 @@ MQTT_DISCOVERY_PREFIX = get_config('MQTT_DISCOVERY_PREFIX', 'homeassistant')
 MQTT_STATE_PREFIX = get_config('MQTT_STATE_PREFIX', 'comma')
 POLL_INTERVAL = get_config('LOCATION_POLL_INTERVAL', 60, type=int)
 SPEED_UNIT = get_config('MQTT_SPEED_UNIT', 'km/h').lower()
+MQTT_DEVICE_NAME = get_config('MQTT_DEVICE_NAME', None) or get_config('COMMA_DEVICE_NAME', None) or get_config('COMMA_NICKNAME', None)
 
 
 def on_connect(client, userdata, flags, rc, *args):
@@ -48,9 +49,11 @@ def publish_discovery(client):
     status_topic = f"{MQTT_STATE_PREFIX}/{DONGLE_ID}/status"
     attr_topic = f"{MQTT_STATE_PREFIX}/{DONGLE_ID}/attributes"
 
+    device_display_name = MQTT_DEVICE_NAME if MQTT_DEVICE_NAME else f"Comma {DONGLE_ID}"
+
     device_info = {
         "identifiers": [device_id],
-        "name": f"Comma {DONGLE_ID}",
+        "name": device_display_name,
         "model": "comma 3 / 3X",
         "manufacturer": "comma.ai"
     }
@@ -59,8 +62,9 @@ def publish_discovery(client):
     # Note: Omit state_topic so Home Assistant automatically computes zones (home/not_home)
     # based on the latitude/longitude provided in json_attributes_topic.
     tracker_config_topic = f"{MQTT_DISCOVERY_PREFIX}/device_tracker/{device_id}/config"
+    tracker_name = f"{device_display_name} Tracker" if MQTT_DEVICE_NAME else "Location"
     tracker_payload = {
-        "name": "Location",
+        "name": tracker_name,
         "unique_id": f"{device_id}_tracker",
         "device": device_info,
         "json_attributes_topic": attr_topic,
@@ -71,7 +75,7 @@ def publish_discovery(client):
         "icon": "mdi:car-connected"
     }
     client.publish(tracker_config_topic, json.dumps(tracker_payload), retain=True)
-    logger.info(f"Published Home Assistant device tracker discovery: {tracker_config_topic}")
+    logger.info(f"Published Home Assistant device tracker discovery ({tracker_name}): {tracker_config_topic}")
 
     # 2. Speed Sensor
     if SPEED_UNIT == 'mph':
@@ -84,9 +88,10 @@ def publish_discovery(client):
         speed_template = "{{ (value_json.speed * 3.6) | round(1) if value_json.speed is not none else 0 }}"
         unit_str = "km/h"
 
+    speed_name = f"{device_display_name} Speed" if MQTT_DEVICE_NAME else "Speed"
     speed_config_topic = f"{MQTT_DISCOVERY_PREFIX}/sensor/{device_id}_speed/config"
     speed_payload = {
-        "name": "Speed",
+        "name": speed_name,
         "unique_id": f"{device_id}_speed",
         "device": device_info,
         "state_topic": attr_topic,
@@ -102,9 +107,10 @@ def publish_discovery(client):
     client.publish(speed_config_topic, json.dumps(speed_payload), retain=True)
 
     # 3. Location Source Diagnostic Sensor
+    source_name = f"{device_display_name} Location Source" if MQTT_DEVICE_NAME else "Location Source"
     source_config_topic = f"{MQTT_DISCOVERY_PREFIX}/sensor/{device_id}_source/config"
     source_payload = {
-        "name": "Location Source",
+        "name": source_name,
         "unique_id": f"{device_id}_source",
         "device": device_info,
         "state_topic": attr_topic,
@@ -118,9 +124,10 @@ def publish_discovery(client):
     client.publish(source_config_topic, json.dumps(source_payload), retain=True)
 
     # 4. Compass Bearing Diagnostic Sensor
+    bearing_name = f"{device_display_name} Bearing" if MQTT_DEVICE_NAME else "Bearing"
     bearing_config_topic = f"{MQTT_DISCOVERY_PREFIX}/sensor/{device_id}_bearing/config"
     bearing_payload = {
-        "name": "Bearing",
+        "name": bearing_name,
         "unique_id": f"{device_id}_bearing",
         "device": device_info,
         "state_topic": attr_topic,
@@ -194,12 +201,14 @@ def main():
                         "bearing": location.get('bearing', 0),
                         "source": location.get('source', 'unknown'),
                         "dongle_id": DONGLE_ID,
+                        "device_name": MQTT_DEVICE_NAME or f"Comma {DONGLE_ID}",
                         "last_updated": datetime.now(timezone.utc).isoformat()
                     }
 
                     # Publish retained JSON attributes so HA updates GPS pin and zone immediately
                     client.publish(attr_topic, json.dumps(ha_attributes), retain=True)
-                    logger.info(f"Published location to MQTT: lat={lat}, lng={lng}, source={location.get('source')} (interval: {POLL_INTERVAL}s)")
+                    disp_name = MQTT_DEVICE_NAME or f"Comma {DONGLE_ID}"
+                    logger.info(f"Published location for '{disp_name}' to MQTT: lat={lat}, lng={lng}, source={location.get('source')} (interval: {POLL_INTERVAL}s)")
                 else:
                     logger.warning("Location data received from Comma API but lat/lng were empty.")
             else:

@@ -81,6 +81,7 @@ MQTT_HOST=192.168.1.100
 MQTT_PORT=1883
 MQTT_USER=homeassistant
 MQTT_PASSWORD=your_mqtt_password
+MQTT_DEVICE_NAME=Toyota Corolla
 MQTT_SPEED_UNIT=km/h
 LOCATION_POLL_INTERVAL=60
 ```
@@ -99,6 +100,7 @@ LOCATION_POLL_INTERVAL=60
 | `MQTT_PORT` | `1883` | MQTT broker port |
 | `MQTT_USER` | None | MQTT broker username (optional) |
 | `MQTT_PASSWORD` | None | MQTT broker password (optional) |
+| `MQTT_DEVICE_NAME` | `Comma <dongle_id>` | Custom friendly device name in Home Assistant |
 | `MQTT_SPEED_UNIT` | `km/h` | Speed sensor unit (`km/h`, `mph`, `m/s`) |
 | `LOCATION_POLL_INTERVAL` | `60` | Location polling interval in seconds |
 | `LOADING_PATH` | `/app/assets/loading.ts` | Path to loading video screen |
