@@ -46,16 +46,15 @@ MEDIAMTX_PID=$!
 
 sleep 2
 
+DISABLE_COMMA=$(python3 -c "from comma_api import get_config; print(str(get_config('DISABLE_COMMA', False, bool)).lower())")
 if [ "$DISABLE_COMMA" != "true" ]; then
   echo "Starting Comma Download script..."
   python /app/src/comma_download.py &
   COMMA_PID=$!
 fi
 
-# Use python to extract ENABLE_MQTT from .env
-ENABLE_MQTT=$(python3 -c "import os; from dotenv import load_dotenv; load_dotenv('/app/.env'); print(os.environ.get('ENABLE_MQTT', 'False'))")
-
-if [ "${ENABLE_MQTT,,}" = "true" ]; then
+ENABLE_MQTT=$(python3 -c "from comma_api import get_config; print(str(get_config('ENABLE_MQTT', False, bool)).lower())")
+if [ "$ENABLE_MQTT" = "true" ]; then
   echo "Starting Comma MQTT script..."
   python /app/src/comma_mqtt.py &
   MQTT_PID=$!
