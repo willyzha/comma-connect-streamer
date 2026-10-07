@@ -25,12 +25,7 @@ from fifo_streamer import ClipsFifo, GenericSegment
 from comma_auth import CommaAuth
 from comma_api import make_api_request, DONGLE_ID, auth, get_config, api_session
 
-# Load configuration from .env file if it exists
-# We check both the script directory and the current working directory
-load_dotenv(os.path.join(os.getcwd(), '.env'))
-load_dotenv(os.path.join(os.path.dirname(os.path.abspath(__file__)), '.env'))
-
-# CONFIGS (with ENV/ .env overrides)
+# CONFIGS (with ENV / config.conf overrides via comma_api)
 WRITE_TIMESTAMPS = get_config('WRITE_TIMESTAMPS', True, type=bool)
 DELETE_CLIPS = get_config('DELETE_CLIPS', True, type=bool)
 LOG_LEVEL_STR = get_config('LOG_LEVEL', 'INFO')

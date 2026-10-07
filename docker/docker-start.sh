@@ -9,14 +9,30 @@ mkdir -p /dev/shm/dashcam/clips
 [[ -p /dev/shm/new_clip.fifo ]] || mkfifo /dev/shm/new_clip.fifo
 
 # --- 2. Configuration Setup ---
-# We prioritize .env in the mounted /config directory.
-if [ ! -f "/config/.env" ]; then
-  echo "No .env file found in /config. Initializing with defaults from .env.example..."
-  cp /app/.env.example /config/.env
+# Check for visible config.conf first, then config.env, legacy .env, or initialize from config.conf.example
+if [ -f "/config/config.conf" ]; then
+  echo "Found configuration in /config/config.conf"
+elif [ -f "/config/config.env" ]; then
+  echo "Found configuration in /config/config.env. Migrating to /config/config.conf..."
+  cp /config/config.env /config/config.conf
+elif [ -f "/config/.env" ]; then
+  echo "Found legacy /config/.env. Migrating to visible /config/config.conf..."
+  cp /config/.env /config/config.conf
+else
+  echo "No configuration file found in /config. Initializing visible config from config.conf.example..."
+  if [ -f "/app/config.conf.example" ]; then
+    cp /app/config.conf.example /config/config.conf
+  elif [ -f "/app/config.env.example" ]; then
+    cp /app/config.env.example /config/config.conf
+  elif [ -f "/app/.env.example" ]; then
+    cp /app/.env.example /config/config.conf
+  fi
 fi
 
-# Link /config/.env to where the app expects it
-ln -sf /config/.env /app/.env
+# Link configuration to app working directory
+ln -sf /config/config.conf /app/config.conf
+ln -sf /config/config.conf /app/config.env
+ln -sf /config/config.conf /app/.env
 
 # --- 3. MediaMTX Config Generation ---
 # We always generate this in /tmp so it's ephemeral and stays up-to-date with image updates

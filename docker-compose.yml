@@ -12,6 +12,9 @@ services:
       - "1935:1935"  # RTMP
     environment:
       - DISABLE_COMMA=false
+    # Optionally pass config directly:
+    # env_file:
+    #   - config.conf
     volumes:
       - ./data:/data
       - ./config:/config

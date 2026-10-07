@@ -7,11 +7,29 @@ import time
 from datetime import datetime
 from dotenv import load_dotenv, dotenv_values
 
-# Load configuration without destructive override
-load_dotenv(os.path.join(os.getcwd(), '.env'))
-load_dotenv(os.path.join(os.path.dirname(os.path.abspath(__file__)), '.env'))
-if os.path.exists('/config/.env'):
-    load_dotenv('/config/.env')
+# Configuration file candidates in order of priority (visible config.conf preferred)
+CONFIG_CANDIDATES = [
+    '/config/config.conf',
+    '/config/config.env',
+    '/config/.env',
+    os.path.join(os.getcwd(), 'config.conf'),
+    os.path.join(os.getcwd(), 'config', 'config.conf'),
+    os.path.join(os.path.dirname(os.path.abspath(__file__)), 'config.conf'),
+    os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), 'config.conf'),
+    os.path.join(os.getcwd(), 'config.env'),
+    os.path.join(os.getcwd(), 'config', 'config.env'),
+    os.path.join(os.path.dirname(os.path.abspath(__file__)), 'config.env'),
+    os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), 'config.env'),
+    os.path.join(os.getcwd(), '.env'),
+    os.path.join(os.path.dirname(os.path.abspath(__file__)), '.env'),
+    os.path.join(os.path.dirname(os.path.abspath(__file__)), 'config', '.env'),
+    os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), 'config', '.env'),
+]
+
+# Load configuration from first available config files without destructive override
+for cfg_path in CONFIG_CANDIDATES:
+    if os.path.isfile(cfg_path):
+        load_dotenv(cfg_path)
 
 PLACEHOLDERS = {'your_dongle_id_here', 'your_jwt_key_here', 'JWT your_jwt_key_here', 'your_password', 'your_device_id'}
 
@@ -20,15 +38,9 @@ def is_valid_val(v):
 
 def get_config(key, fallback, type=str):
     val = os.environ.get(key)
-    # If os.environ doesn't have a valid value (or has a placeholder), check .env files directly
+    # If os.environ doesn't have a valid value (or has a placeholder), check config files directly
     if not is_valid_val(val):
-        candidates = [
-            '/config/.env',
-            os.path.join(os.getcwd(), '.env'),
-            os.path.join(os.path.dirname(os.path.abspath(__file__)), '.env'),
-            os.path.join(os.path.dirname(os.path.abspath(__file__)), 'config', '.env')
-        ]
-        for env_path in candidates:
+        for env_path in CONFIG_CANDIDATES:
             if os.path.isfile(env_path):
                 try:
                     file_vals = dotenv_values(env_path)

@@ -153,7 +153,7 @@ def main():
         return
 
     while not DONGLE_ID or DONGLE_ID == 'your_dongle_id_here':
-        logger.error("COMMA_DONGLE_ID not configured. Set COMMA_DONGLE_ID in /config/.env or container environment variables. Checking again in 60s...")
+        logger.error("COMMA_DONGLE_ID not configured. Set COMMA_DONGLE_ID in /config/config.conf or container environment variables. Checking again in 60s...")
         time.sleep(60)
         DONGLE_ID = get_config('COMMA_DONGLE_ID', 'your_dongle_id_here')
 

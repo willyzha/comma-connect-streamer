@@ -1,6 +1,11 @@
 # --- Environment & Config ---
 .env
 .env.docker
+config.env
+config.conf
+*.env
+!config.conf.example
+!config.env.example
 ! .env.example
 config/
 *.db

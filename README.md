@@ -16,16 +16,19 @@
 - **Multi-Tiered GPS Fallback**: Seamlessly resolves location using live Athena RPC, cached device GPS, or parked coordinates from the latest drive.
 - **Dockerized**: Easy single-container deployment with pre-built multi-service supervisor.
 
+
 ## Quick Start
 
-### 1. Configure Environment
-Copy the example environment configuration:
+### 1. Configure Settings
+Copy the example configuration file:
 ```bash
-cp .env.example .env
+cp config.conf.example config.conf
 ```
-Edit `.env` and set your device details:
+Edit `config.conf` (or `config/config.conf`) and set your device details:
 * `COMMA_DONGLE_ID`: Your Comma 3/3X Dongle ID (found in Comma Connect).
 * `COMMA_JWT_KEY`: Your Comma.ai JWT token (from [jwt.comma.ai](https://jwt.comma.ai)).
+
+*(Note: When mounting `./config:/config` in Docker, the container will automatically initialize `./config/config.conf` on first boot if it does not already exist).*
 
 ### 2. Launch with Docker Compose
 ```bash
@@ -47,7 +50,7 @@ The streamer directly publishes to Home Assistant using **MQTT Auto-Discovery**.
 * **Bearing Sensor** (`sensor.comma_<dongle_id>_bearing`): Compass heading in degrees.
 * **Availability Tracking**: Uses MQTT Last Will and Testament (LWT) to mark entities as online/offline automatically.
 
-### Enabling MQTT in `.env`:
+### Enabling MQTT in `config.conf`:
 ```ini
 ENABLE_MQTT=True
 MQTT_HOST=192.168.1.100
