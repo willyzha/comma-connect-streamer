@@ -225,5 +225,5 @@ def get_device_location(dongle_id=None):
     except Exception as e:
         logger.error(f"Error fetching route fallback from Comma API: {e}")
 
-    logger.warning("No location data could be retrieved from any source.")
+    logger.debug("No location data could be retrieved from any source.")
     return None

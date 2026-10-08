@@ -183,9 +183,12 @@ def main():
 
     attr_topic = f"{MQTT_STATE_PREFIX}/{DONGLE_ID}/attributes"
 
+    device_was_online = None
+
     try:
         while True:
             location = get_location()
+            disp_name = MQTT_DEVICE_NAME or f"Comma {DONGLE_ID}"
             if location:
                 lat = location.get('lat')
                 lng = location.get('lng')
@@ -201,18 +204,28 @@ def main():
                         "bearing": location.get('bearing', 0),
                         "source": location.get('source', 'unknown'),
                         "dongle_id": DONGLE_ID,
-                        "device_name": MQTT_DEVICE_NAME or f"Comma {DONGLE_ID}",
+                        "device_name": disp_name,
                         "last_updated": datetime.now(timezone.utc).isoformat()
                     }
 
                     # Publish retained JSON attributes so HA updates GPS pin and zone immediately
                     client.publish(attr_topic, json.dumps(ha_attributes), retain=True)
-                    disp_name = MQTT_DEVICE_NAME or f"Comma {DONGLE_ID}"
-                    logger.info(f"Published location for '{disp_name}' to MQTT: lat={lat}, lng={lng}, source={location.get('source')} (interval: {POLL_INTERVAL}s)")
+                    if device_was_online is False or device_was_online is None:
+                        logger.info(f"Comma device '{disp_name}' is online. Published location to MQTT: lat={lat}, lng={lng}, source={location.get('source')} (interval: {POLL_INTERVAL}s)")
+                    else:
+                        logger.info(f"Published location for '{disp_name}' to MQTT: lat={lat}, lng={lng}, source={location.get('source')} (interval: {POLL_INTERVAL}s)")
+                    device_was_online = True
                 else:
                     logger.warning("Location data received from Comma API but lat/lng were empty.")
             else:
-                logger.debug("No location data available in this polling cycle.")
+                if device_was_online is True:
+                    logger.info(f"Comma device '{disp_name}' is now offline or has no GPS fix. Polling quietly in background...")
+                    device_was_online = False
+                elif device_was_online is None:
+                    logger.info(f"Comma device '{disp_name}' is currently offline (no location fix available). Polling quietly in background (interval: {POLL_INTERVAL}s)...")
+                    device_was_online = False
+                else:
+                    logger.debug("No location data available in this polling cycle.")
 
             time.sleep(POLL_INTERVAL)
     except KeyboardInterrupt:
