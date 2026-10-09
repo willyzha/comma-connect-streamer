@@ -33,14 +33,68 @@ SPEED_UNIT = get_config('MQTT_SPEED_UNIT', 'km/h').lower()
 MQTT_DEVICE_NAME = get_config('MQTT_DEVICE_NAME', None) or get_config('COMMA_DEVICE_NAME', None) or get_config('COMMA_NICKNAME', None)
 
 
+def publish_location_attributes(client, location):
+    """Publishes device tracker GPS coordinates and companion sensor attributes to MQTT."""
+    if not location:
+        return False
+    lat = location.get('lat')
+    lng = location.get('lng')
+    if lat is None or lng is None:
+        return False
+
+    disp_name = MQTT_DEVICE_NAME or f"Comma {DONGLE_ID}"
+    attr_topic = f"{MQTT_STATE_PREFIX}/{DONGLE_ID}/attributes"
+    ha_attributes = {
+        "latitude": float(lat),
+        "longitude": float(lng),
+        "gps_accuracy": location.get('accuracy', 15),
+        "altitude": location.get('altitude', 0),
+        "speed": location.get('speed', 0),
+        "bearing": location.get('bearing', 0),
+        "source": location.get('source', 'unknown'),
+        "dongle_id": DONGLE_ID,
+        "device_name": disp_name,
+        "last_updated": datetime.now(timezone.utc).isoformat()
+    }
+    client.publish(attr_topic, json.dumps(ha_attributes), retain=True)
+    return True
+
+
 def on_connect(client, userdata, flags, rc, *args):
     if rc == 0:
         logger.info("Connected to MQTT Broker successfully.")
-        publish_discovery(client)
         status_topic = f"{MQTT_STATE_PREFIX}/{DONGLE_ID}/status"
         client.publish(status_topic, "online", retain=True)
+        publish_discovery(client)
+
+        # Immediately publish current / last known location so Home Assistant displays tracker even after broker wipe
+        loc = get_device_location()
+        if loc and publish_location_attributes(client, loc):
+            logger.info(f"Published retained location attributes on connect: lat={loc.get('lat')}, lng={loc.get('lng')}, source={loc.get('source')}")
+
+        # Subscribe to Home Assistant birth topic to recover automatically if HA restarts
+        ha_status_topic = f"{MQTT_DISCOVERY_PREFIX}/status"
+        client.subscribe(ha_status_topic)
+        logger.info(f"Subscribed to Home Assistant birth messages: {ha_status_topic}")
     else:
         logger.error(f"Failed to connect to MQTT Broker, return code {rc}")
+
+
+def on_message(client, userdata, msg):
+    try:
+        topic = msg.topic
+        payload = msg.payload.decode().strip()
+        ha_status_topic = f"{MQTT_DISCOVERY_PREFIX}/status"
+        if topic == ha_status_topic and payload.lower() in ("online", "birth"):
+            logger.info("Home Assistant birth message detected. Republishing discovery and location attributes...")
+            status_topic = f"{MQTT_STATE_PREFIX}/{DONGLE_ID}/status"
+            client.publish(status_topic, "online", retain=True)
+            publish_discovery(client)
+            loc = get_device_location()
+            if loc:
+                publish_location_attributes(client, loc)
+    except Exception as e:
+        logger.error(f"Error handling MQTT message: {e}")
 
 
 def publish_discovery(client):
@@ -167,6 +221,7 @@ def main():
         client.username_pw_set(MQTT_USER, MQTT_PASS)
 
     client.on_connect = on_connect
+    client.on_message = on_message
 
     # Configure Last Will and Testament (LWT) for availability tracking
     status_topic = f"{MQTT_STATE_PREFIX}/{DONGLE_ID}/status"
@@ -181,40 +236,44 @@ def main():
 
     client.loop_start()
 
-    attr_topic = f"{MQTT_STATE_PREFIX}/{DONGLE_ID}/attributes"
-
     device_was_online = None
+    poll_cycle = 0
 
     try:
         while True:
+            poll_cycle += 1
+            # Periodically re-assert discovery and online status (every 10 cycles / ~10 minutes)
+            # to recover if broker was cleared/flushed without a disconnect event
+            if poll_cycle % 10 == 0:
+                publish_discovery(client)
+                client.publish(status_topic, "online", retain=True)
+
             location = get_location()
             disp_name = MQTT_DEVICE_NAME or f"Comma {DONGLE_ID}"
+
             if location:
-                lat = location.get('lat')
-                lng = location.get('lng')
+                source = location.get('source', 'unknown')
+                is_live = (source == 'athena_live')
 
-                if lat is not None and lng is not None:
-                    # Home Assistant device_tracker expects 'latitude', 'longitude', and 'gps_accuracy'
-                    ha_attributes = {
-                        "latitude": lat,
-                        "longitude": lng,
-                        "gps_accuracy": location.get('accuracy', 15),
-                        "altitude": location.get('altitude', 0),
-                        "speed": location.get('speed', 0),
-                        "bearing": location.get('bearing', 0),
-                        "source": location.get('source', 'unknown'),
-                        "dongle_id": DONGLE_ID,
-                        "device_name": disp_name,
-                        "last_updated": datetime.now(timezone.utc).isoformat()
-                    }
-
-                    # Publish retained JSON attributes so HA updates GPS pin and zone immediately
-                    client.publish(attr_topic, json.dumps(ha_attributes), retain=True)
-                    if device_was_online is False or device_was_online is None:
-                        logger.info(f"Comma device '{disp_name}' is online. Published location to MQTT: lat={lat}, lng={lng}, source={location.get('source')} (interval: {POLL_INTERVAL}s)")
+                if publish_location_attributes(client, location):
+                    lat = location.get('lat')
+                    lng = location.get('lng')
+                    if is_live:
+                        if device_was_online is False or device_was_online is None:
+                            logger.info(f"Comma device '{disp_name}' is online. Published live location to MQTT: lat={lat}, lng={lng}, source={source} (interval: {POLL_INTERVAL}s)")
+                        else:
+                            logger.info(f"Published location for '{disp_name}' to MQTT: lat={lat}, lng={lng}, source={source} (interval: {POLL_INTERVAL}s)")
+                        device_was_online = True
                     else:
-                        logger.info(f"Published location for '{disp_name}' to MQTT: lat={lat}, lng={lng}, source={location.get('source')} (interval: {POLL_INTERVAL}s)")
-                    device_was_online = True
+                        # Device is parked / cached
+                        if device_was_online is True:
+                            logger.info(f"Comma device '{disp_name}' went offline. Preserving parked location: lat={lat}, lng={lng}, source={source}")
+                            device_was_online = False
+                        elif device_was_online is None:
+                            logger.info(f"Comma device '{disp_name}' is currently parked/offline. Published saved location: lat={lat}, lng={lng}, source={source}")
+                            device_was_online = False
+                        else:
+                            logger.debug(f"Preserved parked location for '{disp_name}': lat={lat}, lng={lng}, source={source}")
                 else:
                     logger.warning("Location data received from Comma API but lat/lng were empty.")
             else:
