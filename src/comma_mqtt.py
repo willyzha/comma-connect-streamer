@@ -2,6 +2,7 @@ import time
 import json
 import logging
 import os
+import requests
 from datetime import datetime, timezone
 
 try:
@@ -31,6 +32,74 @@ MQTT_STATE_PREFIX = get_config('MQTT_STATE_PREFIX', 'comma')
 POLL_INTERVAL = get_config('LOCATION_POLL_INTERVAL', 60, type=int)
 SPEED_UNIT = get_config('MQTT_SPEED_UNIT', 'km/h').lower()
 MQTT_DEVICE_NAME = get_config('MQTT_DEVICE_NAME', None) or get_config('COMMA_DEVICE_NAME', None) or get_config('COMMA_NICKNAME', None)
+ENABLE_REVERSE_GEOCODE = get_config('ENABLE_REVERSE_GEOCODE', True, type=bool)
+
+_last_geocoded_coords = (None, None)
+_last_geocoded_address = None
+
+
+def get_address_for_coords(lat, lng):
+    """Performs reverse geocoding to human-readable address with caching."""
+    global _last_geocoded_coords, _last_geocoded_address
+    if not ENABLE_REVERSE_GEOCODE or lat is None or lng is None:
+        return None
+
+    try:
+        # Check cache: if coords within ~20-40 meters (0.0003 deg), return cached address
+        if _last_geocoded_coords[0] is not None and _last_geocoded_coords[1] is not None:
+            lat_diff = abs(float(lat) - float(_last_geocoded_coords[0]))
+            lng_diff = abs(float(lng) - float(_last_geocoded_coords[1]))
+            if lat_diff < 0.0003 and lng_diff < 0.0003 and _last_geocoded_address:
+                return _last_geocoded_address
+
+        url = "https://nominatim.openstreetmap.org/reverse"
+        headers = {
+            "User-Agent": "CommaConnectStreamer/0.2.3 (https://github.com/willyzha/comma-connect-streamer)"
+        }
+        params = {
+            "format": "jsonv2",
+            "lat": lat,
+            "lon": lng,
+            "zoom": 18,
+            "addressdetails": 1
+        }
+        resp = requests.get(url, params=params, headers=headers, timeout=5)
+        if resp.status_code == 200:
+            data = resp.json()
+            addr = data.get('address', {})
+            parts = []
+            street = addr.get('road') or addr.get('pedestrian') or addr.get('street')
+            house_num = addr.get('house_number')
+            if street:
+                if house_num:
+                    parts.append(f"{house_num} {street}")
+                else:
+                    parts.append(street)
+
+            city = addr.get('city') or addr.get('town') or addr.get('village') or addr.get('suburb')
+            if city:
+                parts.append(city)
+
+            state = addr.get('state')
+            postcode = addr.get('postcode')
+            if state and postcode:
+                parts.append(f"{state} {postcode}")
+            elif state:
+                parts.append(state)
+
+            country = addr.get('country')
+            if country and country not in ('United States', 'USA'):
+                parts.append(country)
+
+            formatted = ', '.join(parts) if parts else data.get('display_name', 'Unknown')
+            _last_geocoded_coords = (float(lat), float(lng))
+            _last_geocoded_address = formatted
+            logger.debug(f"Reverse geocoded location ({lat}, {lng}) -> {formatted}")
+            return formatted
+    except Exception as e:
+        logger.debug(f"Reverse geocode lookup failed: {e}")
+
+    return _last_geocoded_address
 
 
 def publish_location_attributes(client, location):
@@ -44,6 +113,8 @@ def publish_location_attributes(client, location):
 
     disp_name = MQTT_DEVICE_NAME or f"Comma {DONGLE_ID}"
     attr_topic = f"{MQTT_STATE_PREFIX}/{DONGLE_ID}/attributes"
+    addr = get_address_for_coords(lat, lng)
+
     ha_attributes = {
         "latitude": float(lat),
         "longitude": float(lng),
@@ -52,6 +123,7 @@ def publish_location_attributes(client, location):
         "speed": location.get('speed', 0),
         "bearing": location.get('bearing', 0),
         "source": location.get('source', 'unknown'),
+        "address": addr,
         "dongle_id": DONGLE_ID,
         "device_name": disp_name,
         "last_updated": datetime.now(timezone.utc).isoformat()
@@ -194,6 +266,24 @@ def publish_discovery(client):
         "payload_not_available": "offline"
     }
     client.publish(bearing_config_topic, json.dumps(bearing_payload), retain=True)
+
+    # 5. Address Diagnostic Sensor
+    if ENABLE_REVERSE_GEOCODE:
+        address_config_topic = f"{MQTT_DISCOVERY_PREFIX}/sensor/{device_id}_address/config"
+        address_payload = {
+            "name": "Address",
+            "has_entity_name": True,
+            "unique_id": f"{device_id}_address",
+            "device": device_info,
+            "state_topic": attr_topic,
+            "value_template": "{{ value_json.address if value_json.address is not none else 'Unknown' }}",
+            "icon": "mdi:map-marker",
+            "entity_category": "diagnostic",
+            "availability_topic": status_topic,
+            "payload_available": "online",
+            "payload_not_available": "offline"
+        }
+        client.publish(address_config_topic, json.dumps(address_payload), retain=True)
 
 
 def get_location():

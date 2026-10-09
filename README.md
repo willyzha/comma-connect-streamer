@@ -45,6 +45,7 @@ Open VLC, ffplay, or any RTSP client and connect to:
 
 The streamer directly publishes to Home Assistant using **MQTT Auto-Discovery**. Home Assistant will automatically create a device card under **Settings > Devices & Services > MQTT** containing:
 * **Device Tracker** (`device_tracker.comma_<dongle_id>`): Displays live vehicle position on the Home Assistant map and automatically calculates zone entry/exit (`home`, `work`, `not_home`).
+* **Address Sensor** (`sensor.comma_<dongle_id>_address`): Automatic reverse-geocoded human-readable street address via OpenStreetMap.
 * **Vehicle Speed Sensor** (`sensor.comma_<dongle_id>_speed`): Real-time speed with configurable units (`km/h`, `mph`, `m/s`).
 * **Location Source Sensor** (`sensor.comma_<dongle_id>_source`): Diagnostic sensor showing GPS source (`athena_live`, `device_cached`, or `last_route_parked`).
 * **Bearing Sensor** (`sensor.comma_<dongle_id>_bearing`): Compass heading in degrees.
@@ -60,6 +61,7 @@ MQTT_PASSWORD=your_mqtt_password
 MQTT_DEVICE_NAME=Toyota Corolla
 MQTT_SPEED_UNIT=km/h
 LOCATION_POLL_INTERVAL=60
+ENABLE_REVERSE_GEOCODE=True
 ```
 
 ## Environment Variables
@@ -77,6 +79,7 @@ LOCATION_POLL_INTERVAL=60
 | `MQTT_USER` | None | MQTT broker username (optional) |
 | `MQTT_PASSWORD` | None | MQTT broker password (optional) |
 | `MQTT_DEVICE_NAME` | `Comma <dongle_id>` | Custom friendly device name in Home Assistant |
+| `ENABLE_REVERSE_GEOCODE` | `True` | Automatically reverse-geocode GPS into street address |
 | `MQTT_SPEED_UNIT` | `km/h` | Speed sensor unit (`km/h`, `mph`, `m/s`) |
 | `LOCATION_POLL_INTERVAL` | `60` | Location polling interval in seconds |
 | `LOADING_PATH` | `/app/assets/loading.ts` | Path to loading video screen |

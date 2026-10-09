@@ -91,3 +91,6 @@ COMMA_JWT_KEY=your_jwt_key_here
 
 # How often to poll for location (in seconds)
 # LOCATION_POLL_INTERVAL=60
+
+# Automatically reverse-geocode GPS coordinates into human-readable street addresses
+# ENABLE_REVERSE_GEOCODE=True
