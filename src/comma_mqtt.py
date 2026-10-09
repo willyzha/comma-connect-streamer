@@ -116,9 +116,9 @@ def publish_discovery(client):
     # Note: Omit state_topic so Home Assistant automatically computes zones (home/not_home)
     # based on the latitude/longitude provided in json_attributes_topic.
     tracker_config_topic = f"{MQTT_DISCOVERY_PREFIX}/device_tracker/{device_id}/config"
-    tracker_name = f"{device_display_name} Tracker" if MQTT_DEVICE_NAME else "Location"
     tracker_payload = {
-        "name": tracker_name,
+        "name": "Tracker",
+        "has_entity_name": True,
         "unique_id": f"{device_id}_tracker",
         "device": device_info,
         "json_attributes_topic": attr_topic,
@@ -129,7 +129,7 @@ def publish_discovery(client):
         "icon": "mdi:car-connected"
     }
     client.publish(tracker_config_topic, json.dumps(tracker_payload), retain=True)
-    logger.info(f"Published Home Assistant device tracker discovery ({tracker_name}): {tracker_config_topic}")
+    logger.info(f"Published Home Assistant device tracker discovery: {tracker_config_topic}")
 
     # 2. Speed Sensor
     if SPEED_UNIT == 'mph':
@@ -142,10 +142,10 @@ def publish_discovery(client):
         speed_template = "{{ (value_json.speed * 3.6) | round(1) if value_json.speed is not none else 0 }}"
         unit_str = "km/h"
 
-    speed_name = f"{device_display_name} Speed" if MQTT_DEVICE_NAME else "Speed"
     speed_config_topic = f"{MQTT_DISCOVERY_PREFIX}/sensor/{device_id}_speed/config"
     speed_payload = {
-        "name": speed_name,
+        "name": "Speed",
+        "has_entity_name": True,
         "unique_id": f"{device_id}_speed",
         "device": device_info,
         "state_topic": attr_topic,
@@ -161,10 +161,10 @@ def publish_discovery(client):
     client.publish(speed_config_topic, json.dumps(speed_payload), retain=True)
 
     # 3. Location Source Diagnostic Sensor
-    source_name = f"{device_display_name} Location Source" if MQTT_DEVICE_NAME else "Location Source"
     source_config_topic = f"{MQTT_DISCOVERY_PREFIX}/sensor/{device_id}_source/config"
     source_payload = {
-        "name": source_name,
+        "name": "Location Source",
+        "has_entity_name": True,
         "unique_id": f"{device_id}_source",
         "device": device_info,
         "state_topic": attr_topic,
@@ -178,10 +178,10 @@ def publish_discovery(client):
     client.publish(source_config_topic, json.dumps(source_payload), retain=True)
 
     # 4. Compass Bearing Diagnostic Sensor
-    bearing_name = f"{device_display_name} Bearing" if MQTT_DEVICE_NAME else "Bearing"
     bearing_config_topic = f"{MQTT_DISCOVERY_PREFIX}/sensor/{device_id}_bearing/config"
     bearing_payload = {
-        "name": bearing_name,
+        "name": "Bearing",
+        "has_entity_name": True,
         "unique_id": f"{device_id}_bearing",
         "device": device_info,
         "state_topic": attr_topic,
