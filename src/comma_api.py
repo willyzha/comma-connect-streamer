@@ -159,90 +159,134 @@ def load_location_cache():
         logger.debug(f"Could not load location cache: {e}")
     return None
 
+_last_known_battery_voltage = None
+
+
 def get_device_location(dongle_id=None):
     """
-    Fetches the best available location for the device using a multi-tiered approach:
-    1. Direct /v1/devices/{dongle_id}/location (if Comma Prime is active)
-    2. Athena RPC getMessage('gpsLocationExternal') (live GPS directly from device if online)
-    3. Cached last_gps_* fields from /v1.1/devices/{dongle_id}/
-    4. Parked end_lat/end_lng from latest drive in /v1/devices/{dongle_id}/routes
-    5. Persistent local disk cache (/config/last_location.json)
+    Fetches location, vehicle ignition, battery voltage, and device operational status.
+    Prioritizes Comma Connect cloud endpoints to minimize and optimize direct connections to the Comma device:
+    1. Comma Connect Cloud /v1.1/devices/{dongle_id}/ checks last_athena_ping.
+       - If ping_age > 120s, device is powered off: zero calls to Athena. Uses cloud routes / cache.
+       - If ping_age <= 120s, device is online: makes 1 call to Athena for pandaStates (voltage + ignition).
+    2. If vehicle is confirmed driving (ignition=True):
+       - If Prime active: uses cloud /location.
+       - Otherwise: queries Athena gpsLocationExternal for real-time live GPS fix.
+    3. If standby (ignition=False) or powered off:
+       - Uses Comma Connect cloud /routes endpoint for parked position (no direct device GPS query).
     """
+    global _last_known_battery_voltage
     dev_id = dongle_id or DONGLE_ID
     if not dev_id or dev_id == 'your_dongle_id_here':
         logger.error("COMMA_DONGLE_ID not set.")
         return None
 
-    # Step 1: Check device details for Prime status and cached GPS
+    # Step 1: Comma Connect Cloud API (preferred cloud check, zero load on physical device)
     device_info = make_api_request(f"https://api.commadotai.com/v1.1/devices/{dev_id}/", raise_errors=False)
 
-    # If Prime is active on the device, try the official /location endpoint
-    if device_info and device_info.get('prime') is True:
+    last_ping = device_info.get('last_athena_ping') if device_info else None
+    now = time.time()
+    ping_age = (now - last_ping) if last_ping else 9999
+
+    device_power = False
+    device_state = 'powered_off'
+    ignition = False
+    battery_voltage = _last_known_battery_voltage
+
+    # Only communicate with the physical Comma device if Comma Connect reports it has pinged recently (<= 120s)
+    if ping_age <= 120:
+        device_power = True
+        try:
+            # Single lightweight Athena RPC call to fetch panda telemetry (battery voltage and ignition)
+            athena_url = f"https://athena.comma.ai/{dev_id}"
+            athena_payload = {
+                "method": "getMessage",
+                "params": {"service": "pandaStates", "timeout": 1500},
+                "jsonrpc": "2.0",
+                "id": 0
+            }
+            resp = api_session.post(
+                athena_url,
+                headers={'Authorization': auth.token, 'Content-Type': 'application/json'},
+                json=athena_payload,
+                timeout=3
+            )
+            if resp.status_code == 200:
+                ps = resp.json().get('result', {}).get('pandaStates', [])
+                if ps and isinstance(ps, list) and len(ps) > 0:
+                    p0 = ps[0]
+                    raw_v = p0.get('voltage')
+                    if raw_v is not None and raw_v > 0:
+                        battery_voltage = round(raw_v / 1000.0, 2)
+                        _last_known_battery_voltage = battery_voltage
+                    ignition = bool(p0.get('ignitionLine') or p0.get('ignitionCan'))
+
+                device_state = 'driving' if ignition else 'standby'
+            else:
+                device_power = False
+                device_state = 'powered_off'
+        except Exception as e:
+            logger.debug(f"Athena pandaStates attempt failed: {e}")
+            device_power = False
+            device_state = 'powered_off'
+
+    # If vehicle is confirmed driving and Comma Prime is active, check Comma Connect cloud location
+    if device_state == 'driving' and device_info and device_info.get('prime') is True:
         loc = make_api_request(f"https://api.commadotai.com/v1/devices/{dev_id}/location", raise_errors=False)
         if loc and loc.get('lat') is not None and loc.get('lng') is not None:
-            if 'source' not in loc:
-                loc['source'] = 'prime_location'
+            loc['source'] = 'prime_location'
+            loc['device_power'] = device_power
+            loc['device_state'] = device_state
+            loc['ignition'] = ignition
+            loc['battery_voltage'] = battery_voltage
             save_location_cache(loc)
             return loc
 
-    # Step 2: Try querying Athena RPC for real-time live GPS if device is online
-    try:
-        athena_url = f"https://athena.comma.ai/{dev_id}"
-        athena_payload = {
-            "method": "getMessage",
-            "params": {"service": "gpsLocationExternal", "timeout": 3000},
-            "jsonrpc": "2.0",
-            "id": 0
-        }
-        resp = api_session.post(
-            athena_url,
-            headers={'Authorization': auth.token, 'Content-Type': 'application/json'},
-            json=athena_payload,
-            timeout=5
-        )
-        if resp.status_code == 200:
-            res_json = resp.json()
-            if 'result' in res_json and isinstance(res_json['result'], dict):
-                gps = res_json['result'].get('gpsLocationExternal', {})
-                lat = gps.get('latitude')
-                lng = gps.get('longitude')
-                if lat is not None and lng is not None and (lat != 0 or lng != 0):
-                    logger.debug(f"Retrieved live GPS via Athena RPC: {lat}, {lng}")
-                    loc_res = {
-                        'lat': float(lat),
-                        'lng': float(lng),
-                        'speed': gps.get('speed', 0),
-                        'bearing': gps.get('bearingDeg', 0),
-                        'altitude': gps.get('altitude', 0),
-                        'accuracy': gps.get('horizontalAccuracy', 0),
-                        'time': gps.get('unixTimestampMillis', int(time.time() * 1000)),
-                        'source': 'athena_live'
-                    }
-                    save_location_cache(loc_res)
-                    return loc_res
-    except Exception as e:
-        logger.debug(f"Athena RPC attempt failed: {e}")
-
-    # Step 3: Check cached GPS in device_info (/v1.1/devices/{dev_id}/)
-    if device_info:
-        lat = device_info.get('last_gps_lat')
-        lng = device_info.get('last_gps_lng')
-        if lat is not None and lng is not None and (lat != 0 or lng != 0):
-            logger.debug(f"Retrieved GPS from device metadata: {lat}, {lng}")
-            loc_res = {
-                'lat': float(lat),
-                'lng': float(lng),
-                'speed': device_info.get('last_gps_speed', 0),
-                'bearing': device_info.get('last_gps_bearing', 0),
-                'accuracy': device_info.get('last_gps_accuracy', 0),
-                'altitude': 0,
-                'time': device_info.get('last_gps_time', int(time.time() * 1000)),
-                'source': 'device_cached'
+    # If vehicle is confirmed driving, query live GPS from Athena
+    if device_state == 'driving':
+        try:
+            athena_url = f"https://athena.comma.ai/{dev_id}"
+            athena_payload = {
+                "method": "getMessage",
+                "params": {"service": "gpsLocationExternal", "timeout": 2000},
+                "jsonrpc": "2.0",
+                "id": 0
             }
-            save_location_cache(loc_res)
-            return loc_res
+            resp = api_session.post(
+                athena_url,
+                headers={'Authorization': auth.token, 'Content-Type': 'application/json'},
+                json=athena_payload,
+                timeout=4
+            )
+            if resp.status_code == 200:
+                res_json = resp.json()
+                if 'result' in res_json and isinstance(res_json['result'], dict):
+                    gps = res_json['result'].get('gpsLocationExternal', {})
+                    lat = gps.get('latitude')
+                    lng = gps.get('longitude')
+                    if lat is not None and lng is not None and (lat != 0 or lng != 0):
+                        logger.debug(f"Retrieved live GPS via Athena RPC: {lat}, {lng}")
+                        loc_res = {
+                            'lat': float(lat),
+                            'lng': float(lng),
+                            'speed': gps.get('speed', 0),
+                            'bearing': gps.get('bearingDeg', 0),
+                            'altitude': gps.get('altitude', 0),
+                            'accuracy': gps.get('horizontalAccuracy', 0),
+                            'time': gps.get('unixTimestampMillis', int(time.time() * 1000)),
+                            'source': 'athena_live',
+                            'device_power': device_power,
+                            'device_state': device_state,
+                            'ignition': ignition,
+                            'battery_voltage': battery_voltage
+                        }
+                        save_location_cache(loc_res)
+                        return loc_res
+        except Exception as e:
+            logger.debug(f"Athena GPS attempt failed: {e}")
 
-    # Step 4: Fallback to recent routes (last parked position)
+    # For Standby (shutdown timer) or Powered Off states, the car is parked.
+    # Prefer Comma Connect Cloud API for parked location without touching device.
     try:
         routes_url = f"https://api.commadotai.com/v1/devices/{dev_id}/routes"
         routes = make_api_request(routes_url, raise_errors=False)
@@ -250,7 +294,6 @@ def get_device_location(dongle_id=None):
             for route in routes[:10]:
                 lat = route.get('end_lat')
                 lng = route.get('end_lng')
-                # If end_lat is None or 0, fallback to start_lat / start_lng
                 if lat is None or lng is None or (lat == 0 and lng == 0):
                     lat = route.get('start_lat')
                     lng = route.get('start_lng')
@@ -272,19 +315,51 @@ def get_device_location(dongle_id=None):
                         'altitude': 0,
                         'accuracy': 15,
                         'time': t_ms,
-                        'source': 'last_route_parked'
+                        'source': 'last_route_parked',
+                        'device_power': device_power,
+                        'device_state': device_state,
+                        'ignition': ignition,
+                        'battery_voltage': battery_voltage
                     }
                     save_location_cache(loc_res)
                     return loc_res
     except Exception as e:
         logger.error(f"Error fetching route fallback from Comma API: {e}")
 
-    # Step 5: Fallback to persistent disk cache
+    # Fallback to metadata last_gps in device_info from Comma Connect Cloud
+    if device_info:
+        lat = device_info.get('last_gps_lat')
+        lng = device_info.get('last_gps_lng')
+        if lat is not None and lng is not None and (lat != 0 or lng != 0):
+            logger.debug(f"Retrieved GPS from device metadata: {lat}, {lng}")
+            loc_res = {
+                'lat': float(lat),
+                'lng': float(lng),
+                'speed': device_info.get('last_gps_speed', 0),
+                'bearing': device_info.get('last_gps_bearing', 0),
+                'accuracy': device_info.get('last_gps_accuracy', 0),
+                'altitude': 0,
+                'time': device_info.get('last_gps_time', int(time.time() * 1000)),
+                'source': 'device_cached',
+                'device_power': device_power,
+                'device_state': device_state,
+                'ignition': ignition,
+                'battery_voltage': battery_voltage
+            }
+            save_location_cache(loc_res)
+            return loc_res
+
+    # Persistent disk cache fallback
     cached = load_location_cache()
     if cached:
         logger.debug(f"Retrieved GPS from persistent disk cache: {cached.get('lat')}, {cached.get('lng')}")
         cached_res = dict(cached)
         cached_res['source'] = cached.get('source', 'cached_disk')
+        cached_res['device_power'] = device_power
+        cached_res['device_state'] = device_state
+        cached_res['ignition'] = ignition
+        if battery_voltage is not None:
+            cached_res['battery_voltage'] = battery_voltage
         return cached_res
 
     logger.debug("No location data could be retrieved from any source.")

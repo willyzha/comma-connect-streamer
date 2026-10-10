@@ -116,7 +116,12 @@ def publish_location_attributes(client, location):
     addr = get_address_for_coords(lat, lng)
 
     source = location.get('source', 'unknown')
-    is_live = (source in ('athena_live', 'prime_location'))
+    device_state = location.get('device_state', 'powered_off')
+    device_power = location.get('device_power', False)
+    ignition = location.get('ignition', False)
+    battery_voltage = location.get('battery_voltage')
+
+    is_live = (device_state == 'driving' or source in ('athena_live', 'prime_location'))
 
     loc_time = location.get('time')
     recorded_at = None
@@ -142,6 +147,10 @@ def publish_location_attributes(client, location):
         "source": source,
         "is_live": is_live,
         "status": "live" if is_live else "parked",
+        "device_state": device_state,
+        "device_power": device_power,
+        "ignition": ignition,
+        "battery_voltage": battery_voltage,
         "recorded_at": recorded_at,
         "address": addr,
         "dongle_id": DONGLE_ID,
@@ -342,6 +351,81 @@ def publish_discovery(client):
     }
     client.publish(last_seen_config_topic, json.dumps(last_seen_payload), retain=True)
 
+    # 8. Car 12V Battery Voltage Sensor
+    battery_config_topic = f"{MQTT_DISCOVERY_PREFIX}/sensor/{device_id}_battery_voltage/config"
+    battery_payload = {
+        "name": "Battery Voltage",
+        "has_entity_name": True,
+        "unique_id": f"{device_id}_battery_voltage",
+        "device": device_info,
+        "state_topic": attr_topic,
+        "value_template": "{{ value_json.battery_voltage if value_json.battery_voltage is not none else 'unknown' }}",
+        "device_class": "voltage",
+        "state_class": "measurement",
+        "unit_of_measurement": "V",
+        "icon": "mdi:car-battery",
+        "availability_topic": status_topic,
+        "payload_available": "online",
+        "payload_not_available": "offline"
+    }
+    client.publish(battery_config_topic, json.dumps(battery_payload), retain=True)
+
+    # 9. Car Ignition Binary Sensor
+    ignition_config_topic = f"{MQTT_DISCOVERY_PREFIX}/binary_sensor/{device_id}_ignition/config"
+    ignition_payload = {
+        "name": "Ignition",
+        "has_entity_name": True,
+        "unique_id": f"{device_id}_ignition",
+        "device": device_info,
+        "state_topic": attr_topic,
+        "value_template": "{{ 'ON' if value_json.ignition else 'OFF' }}",
+        "device_class": "running",
+        "payload_on": "ON",
+        "payload_off": "OFF",
+        "icon": "mdi:key-variant",
+        "availability_topic": status_topic,
+        "payload_available": "online",
+        "payload_not_available": "offline"
+    }
+    client.publish(ignition_config_topic, json.dumps(ignition_payload), retain=True)
+
+    # 10. Device Operational State Sensor (driving, standby on shutdown timer, powered_off)
+    state_config_topic = f"{MQTT_DISCOVERY_PREFIX}/sensor/{device_id}_device_state/config"
+    state_payload = {
+        "name": "Device State",
+        "has_entity_name": True,
+        "unique_id": f"{device_id}_device_state",
+        "device": device_info,
+        "state_topic": attr_topic,
+        "value_template": "{{ value_json.device_state if value_json.device_state is not none else 'powered_off' }}",
+        "icon": "mdi:timer-sand",
+        "entity_category": "diagnostic",
+        "availability_topic": status_topic,
+        "payload_available": "online",
+        "payload_not_available": "offline"
+    }
+    client.publish(state_config_topic, json.dumps(state_payload), retain=True)
+
+    # 11. Device Hardware Power Binary Sensor (ON = Awake/Timer, OFF = Deep sleep)
+    power_config_topic = f"{MQTT_DISCOVERY_PREFIX}/binary_sensor/{device_id}_device_power/config"
+    power_payload = {
+        "name": "Device Power",
+        "has_entity_name": True,
+        "unique_id": f"{device_id}_device_power",
+        "device": device_info,
+        "state_topic": attr_topic,
+        "value_template": "{{ 'ON' if value_json.device_power else 'OFF' }}",
+        "device_class": "power",
+        "payload_on": "ON",
+        "payload_off": "OFF",
+        "icon": "mdi:power",
+        "entity_category": "diagnostic",
+        "availability_topic": status_topic,
+        "payload_available": "online",
+        "payload_not_available": "offline"
+    }
+    client.publish(power_config_topic, json.dumps(power_payload), retain=True)
+
 
 def get_location():
     return get_device_location()
@@ -392,36 +476,39 @@ def main():
 
             if location:
                 source = location.get('source', 'unknown')
-                is_live = (source in ('athena_live', 'prime_location'))
+                device_state = location.get('device_state', 'powered_off')
+                is_live = (device_state == 'driving' or source in ('athena_live', 'prime_location'))
+                battery_v = location.get('battery_voltage')
+                v_str = f", 12V battery={battery_v}V" if battery_v is not None else ""
 
                 if publish_location_attributes(client, location):
                     lat = location.get('lat')
                     lng = location.get('lng')
                     if is_live:
-                        if device_was_online is False or device_was_online is None:
-                            logger.info(f"Comma device '{disp_name}' is online. Published live location to MQTT: lat={lat}, lng={lng}, source={source} (interval: {POLL_INTERVAL}s)")
+                        if device_was_online != 'driving':
+                            logger.info(f"Comma device '{disp_name}' is driving (ignition ON{v_str}). Published live location to MQTT: lat={lat}, lng={lng} (interval: {POLL_INTERVAL}s)")
                         else:
-                            logger.info(f"Published location for '{disp_name}' to MQTT: lat={lat}, lng={lng}, source={source} (interval: {POLL_INTERVAL}s)")
-                        device_was_online = True
+                            logger.info(f"Published driving location for '{disp_name}' to MQTT: lat={lat}, lng={lng}{v_str} (interval: {POLL_INTERVAL}s)")
+                        device_was_online = 'driving'
+                    elif device_state == 'standby':
+                        if device_was_online != 'standby':
+                            logger.info(f"Comma device '{disp_name}' is in standby (shutdown timer active{v_str}). Preserving parked location: lat={lat}, lng={lng}")
+                            device_was_online = 'standby'
+                        else:
+                            logger.debug(f"Preserved standby parked location for '{disp_name}'{v_str}: lat={lat}, lng={lng}")
                     else:
-                        # Device is parked / cached
-                        if device_was_online is True:
-                            logger.info(f"Comma device '{disp_name}' went offline. Preserving parked location: lat={lat}, lng={lng}, source={source}")
-                            device_was_online = False
-                        elif device_was_online is None:
-                            logger.info(f"Comma device '{disp_name}' is currently parked/offline. Published saved location: lat={lat}, lng={lng}, source={source}")
-                            device_was_online = False
+                        # powered_off
+                        if device_was_online != 'powered_off':
+                            logger.info(f"Comma device '{disp_name}' is powered off (deep sleep{v_str}). Preserving parked location: lat={lat}, lng={lng}")
+                            device_was_online = 'powered_off'
                         else:
-                            logger.debug(f"Preserved parked location for '{disp_name}': lat={lat}, lng={lng}, source={source}")
+                            logger.debug(f"Preserved parked location for '{disp_name}': lat={lat}, lng={lng}")
                 else:
                     logger.warning("Location data received from Comma API but lat/lng were empty.")
             else:
-                if device_was_online is True:
-                    logger.info(f"Comma device '{disp_name}' is now offline or has no GPS fix. Polling quietly in background...")
-                    device_was_online = False
-                elif device_was_online is None:
-                    logger.info(f"Comma device '{disp_name}' is currently offline (no location fix available). Polling quietly in background (interval: {POLL_INTERVAL}s)...")
-                    device_was_online = False
+                if device_was_online != 'offline':
+                    logger.info(f"Comma device '{disp_name}' is offline (no location fix available). Polling quietly in background (interval: {POLL_INTERVAL}s)...")
+                    device_was_online = 'offline'
                 else:
                     logger.debug("No location data available in this polling cycle.")
 
