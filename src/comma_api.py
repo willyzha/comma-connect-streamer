@@ -187,11 +187,11 @@ def get_device_location(dongle_id=None):
     Fetches location, vehicle ignition, battery voltage, and device operational status.
     Prioritizes Comma Connect cloud endpoints to minimize and optimize direct connections to the Comma device:
     1. Comma Connect Cloud /v1.1/devices/{dongle_id}/ checks last_athena_ping.
-       - If ping_age > 120s, device is powered off: zero calls to Athena. Uses cloud routes / cache.
-       - If ping_age <= 120s, device is online: makes 1 call to Athena for pandaStates (voltage + ignition).
-    2. If vehicle is confirmed driving (ignition=True):
+       - If ping_age > 180s, device is powered off: zero calls to Athena. Uses cloud routes / cache.
+       - If ping_age <= 180s, device is online: queries Athena deviceState and pandaStates.
+    2. If vehicle is confirmed driving (started=True or ignition=True):
        - If Prime active: uses cloud /location.
-       - Otherwise: queries Athena gpsLocationExternal for real-time live GPS fix.
+       - Otherwise: queries Athena gpsLocation for real-time live GPS fix (speed, bearing, coordinates).
     3. If standby (ignition=False) or powered off:
        - Uses Comma Connect cloud /routes endpoint for parked position (no direct device GPS query).
     """
@@ -213,8 +213,8 @@ def get_device_location(dongle_id=None):
     ignition = False
     battery_voltage = _last_known_battery_voltage
 
-    # Only communicate with the physical Comma device if Comma Connect reports it has pinged recently (<= 120s)
-    if ping_age <= 120:
+    # Only communicate with the physical Comma device if Comma Connect reports it has pinged recently (<= 180s)
+    if ping_age <= 180:
         device_power = True
         athena_url = f"https://athena.comma.ai/{dev_id}"
         try:
@@ -222,11 +222,12 @@ def get_device_location(dongle_id=None):
             resp = api_session.post(
                 athena_url,
                 headers={'Authorization': auth.token, 'Content-Type': 'application/json'},
-                json={'method': 'getMessage', 'params': {'service': 'deviceState', 'timeout': 1000}, 'jsonrpc': '2.0', 'id': 0},
-                timeout=3
+                json={'method': 'getMessage', 'params': {'service': 'deviceState', 'timeout': 1500}, 'jsonrpc': '2.0', 'id': 0},
+                timeout=4
             )
             if resp.status_code == 200:
-                ds = resp.json().get('result', {}).get('deviceState', {})
+                res = resp.json().get('result', {})
+                ds = res.get('deviceState', res) if isinstance(res, dict) else {}
                 started = ds.get('started', False)
                 ignition = bool(started)
                 device_state = 'driving' if started else 'standby'
@@ -244,11 +245,12 @@ def get_device_location(dongle_id=None):
                 p_resp = api_session.post(
                     athena_url,
                     headers={'Authorization': auth.token, 'Content-Type': 'application/json'},
-                    json={'method': 'getMessage', 'params': {'service': 'pandaStates', 'timeout': 1000}, 'jsonrpc': '2.0', 'id': 0},
-                    timeout=3
+                    json={'method': 'getMessage', 'params': {'service': 'pandaStates', 'timeout': 1500}, 'jsonrpc': '2.0', 'id': 0},
+                    timeout=4
                 )
                 if p_resp.status_code == 200:
-                    ps = p_resp.json().get('result', {}).get('pandaStates', [])
+                    res = p_resp.json().get('result', {})
+                    ps = res.get('pandaStates', res) if isinstance(res, dict) else (res if isinstance(res, list) else [])
                     if ps and isinstance(ps, list) and len(ps) > 0:
                         raw_v = ps[0].get('voltage')
                         if raw_v is not None and raw_v > 0:
@@ -272,49 +274,58 @@ def get_device_location(dongle_id=None):
             save_location_cache(loc)
             return loc
 
-    # If vehicle is confirmed driving, query live GPS from Athena
+    # If vehicle is confirmed driving, query live GPS from Athena (prefer internal gpsLocation)
     if device_state == 'driving':
         try:
             athena_url = f"https://athena.comma.ai/{dev_id}"
-            athena_payload = {
-                "method": "getMessage",
-                "params": {"service": "gpsLocationExternal", "timeout": 2000},
-                "jsonrpc": "2.0",
-                "id": 0
-            }
-            resp = api_session.post(
-                athena_url,
-                headers={'Authorization': auth.token, 'Content-Type': 'application/json'},
-                json=athena_payload,
-                timeout=4
-            )
-            if resp.status_code == 200:
-                res_json = resp.json()
-                if 'result' in res_json and isinstance(res_json['result'], dict):
-                    gps = res_json['result'].get('gpsLocationExternal', {})
-                    lat = gps.get('latitude')
-                    lng = gps.get('longitude')
-                    if lat is not None and lng is not None and (lat != 0 or lng != 0):
-                        logger.debug(f"Retrieved live GPS via Athena RPC: {lat}, {lng}")
-                        b_deg = gps.get('bearingDeg', 0)
-                        if b_deg and b_deg != 0:
-                            _last_known_bearing = round(float(b_deg), 1)
-                        loc_res = {
-                            'lat': float(lat),
-                            'lng': float(lng),
-                            'speed': gps.get('speed', 0),
-                            'bearing': _last_known_bearing if _last_known_bearing is not None else 0,
-                            'altitude': gps.get('altitude', 0),
-                            'accuracy': gps.get('horizontalAccuracy', 0),
-                            'time': gps.get('unixTimestampMillis', int(time.time() * 1000)),
-                            'source': 'athena_live',
-                            'device_power': device_power,
-                            'device_state': device_state,
-                            'ignition': ignition,
-                            'battery_voltage': battery_voltage
-                        }
-                        save_location_cache(loc_res)
-                        return loc_res
+            gps = None
+            for svc in ('gpsLocation', 'gpsLocationExternal'):
+                try:
+                    resp = api_session.post(
+                        athena_url,
+                        headers={'Authorization': auth.token, 'Content-Type': 'application/json'},
+                        json={'method': 'getMessage', 'params': {'service': svc, 'timeout': 2000}, 'jsonrpc': '2.0', 'id': 0},
+                        timeout=5
+                    )
+                    if resp.status_code == 200:
+                        res_json = resp.json()
+                        res = res_json.get('result')
+                        if isinstance(res, dict):
+                            g = res.get(svc, res)
+                            if g and g.get('latitude') is not None and g.get('longitude') is not None:
+                                gps = g
+                                break
+                except Exception as svc_err:
+                    logger.debug(f"Athena {svc} attempt failed: {svc_err}")
+
+            if gps:
+                lat = gps.get('latitude')
+                lng = gps.get('longitude')
+                if lat is not None and lng is not None and (lat != 0 or lng != 0):
+                    logger.debug(f"Retrieved live GPS via Athena RPC: {lat}, {lng}")
+                    b_deg = gps.get('bearingDeg')
+                    if b_deg is not None and float(b_deg) > 0:
+                        _last_known_bearing = round(float(b_deg), 1)
+
+                    raw_speed = gps.get('speed')
+                    live_speed = round(float(raw_speed), 2) if raw_speed is not None and raw_speed >= 0 else 0
+
+                    loc_res = {
+                        'lat': float(lat),
+                        'lng': float(lng),
+                        'speed': live_speed,
+                        'bearing': _last_known_bearing if _last_known_bearing is not None else 0,
+                        'altitude': gps.get('altitude', 0),
+                        'accuracy': gps.get('horizontalAccuracy', 15),
+                        'time': gps.get('unixTimestampMillis', int(time.time() * 1000)),
+                        'source': 'athena_live',
+                        'device_power': device_power,
+                        'device_state': device_state,
+                        'ignition': ignition,
+                        'battery_voltage': battery_voltage
+                    }
+                    save_location_cache(loc_res)
+                    return loc_res
         except Exception as e:
             logger.debug(f"Athena GPS attempt failed: {e}")
 
