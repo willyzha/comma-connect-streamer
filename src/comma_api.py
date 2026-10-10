@@ -180,6 +180,8 @@ def get_device_location(dongle_id=None):
     if device_info and device_info.get('prime') is True:
         loc = make_api_request(f"https://api.commadotai.com/v1/devices/{dev_id}/location", raise_errors=False)
         if loc and loc.get('lat') is not None and loc.get('lng') is not None:
+            if 'source' not in loc:
+                loc['source'] = 'prime_location'
             save_location_cache(loc)
             return loc
 

@@ -115,6 +115,23 @@ def publish_location_attributes(client, location):
     attr_topic = f"{MQTT_STATE_PREFIX}/{DONGLE_ID}/attributes"
     addr = get_address_for_coords(lat, lng)
 
+    source = location.get('source', 'unknown')
+    is_live = (source in ('athena_live', 'prime_location'))
+
+    loc_time = location.get('time')
+    recorded_at = None
+    if loc_time:
+        try:
+            ts = float(loc_time)
+            if ts > 1e11:  # Epoch in milliseconds
+                ts = ts / 1000.0
+            recorded_at = datetime.fromtimestamp(ts, tz=timezone.utc).isoformat()
+        except Exception:
+            pass
+
+    if not recorded_at:
+        recorded_at = datetime.now(timezone.utc).isoformat()
+
     ha_attributes = {
         "latitude": float(lat),
         "longitude": float(lng),
@@ -122,7 +139,10 @@ def publish_location_attributes(client, location):
         "altitude": location.get('altitude', 0),
         "speed": location.get('speed', 0),
         "bearing": location.get('bearing', 0),
-        "source": location.get('source', 'unknown'),
+        "source": source,
+        "is_live": is_live,
+        "status": "live" if is_live else "parked",
+        "recorded_at": recorded_at,
         "address": addr,
         "dongle_id": DONGLE_ID,
         "device_name": disp_name,
@@ -285,6 +305,43 @@ def publish_discovery(client):
         }
         client.publish(address_config_topic, json.dumps(address_payload), retain=True)
 
+    # 6. Live Tracking Binary Sensor (Connected = Live GPS, Disconnected = Parked / Last Known)
+    live_config_topic = f"{MQTT_DISCOVERY_PREFIX}/binary_sensor/{device_id}_live/config"
+    live_payload = {
+        "name": "Live Tracking",
+        "has_entity_name": True,
+        "unique_id": f"{device_id}_live",
+        "device": device_info,
+        "state_topic": attr_topic,
+        "value_template": "{{ 'ON' if value_json.is_live else 'OFF' }}",
+        "device_class": "connectivity",
+        "payload_on": "ON",
+        "payload_off": "OFF",
+        "icon": "mdi:car-connected",
+        "availability_topic": status_topic,
+        "payload_available": "online",
+        "payload_not_available": "offline"
+    }
+    client.publish(live_config_topic, json.dumps(live_payload), retain=True)
+
+    # 7. Last Seen Timestamp Sensor
+    last_seen_config_topic = f"{MQTT_DISCOVERY_PREFIX}/sensor/{device_id}_last_seen/config"
+    last_seen_payload = {
+        "name": "Last Seen",
+        "has_entity_name": True,
+        "unique_id": f"{device_id}_last_seen",
+        "device": device_info,
+        "state_topic": attr_topic,
+        "value_template": "{{ value_json.recorded_at if value_json.recorded_at is not none else value_json.last_updated }}",
+        "device_class": "timestamp",
+        "icon": "mdi:clock-check-outline",
+        "entity_category": "diagnostic",
+        "availability_topic": status_topic,
+        "payload_available": "online",
+        "payload_not_available": "offline"
+    }
+    client.publish(last_seen_config_topic, json.dumps(last_seen_payload), retain=True)
+
 
 def get_location():
     return get_device_location()
@@ -335,7 +392,7 @@ def main():
 
             if location:
                 source = location.get('source', 'unknown')
-                is_live = (source == 'athena_live')
+                is_live = (source in ('athena_live', 'prime_location'))
 
                 if publish_location_attributes(client, location):
                     lat = location.get('lat')
