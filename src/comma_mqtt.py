@@ -327,17 +327,9 @@ def main():
     client.loop_start()
 
     device_was_online = None
-    poll_cycle = 0
 
     try:
         while True:
-            poll_cycle += 1
-            # Periodically re-assert discovery and online status (every 10 cycles / ~10 minutes)
-            # to recover if broker was cleared/flushed without a disconnect event
-            if poll_cycle % 10 == 0:
-                publish_discovery(client)
-                client.publish(status_topic, "online", retain=True)
-
             location = get_location()
             disp_name = MQTT_DEVICE_NAME or f"Comma {DONGLE_ID}"
 
