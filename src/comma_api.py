@@ -5,7 +5,7 @@ import json
 from comma_auth import CommaAuth
 import os
 import time
-from datetime import datetime
+from datetime import datetime, timezone
 from dotenv import load_dotenv, dotenv_values
 
 # Configuration file candidates in order of priority (visible config.conf preferred)
@@ -302,7 +302,12 @@ def get_device_location(dongle_id=None):
                     t_ms = int(time.time() * 1000)
                     if end_time_str:
                         try:
-                            dt = datetime.fromisoformat(end_time_str)
+                            clean_time = end_time_str
+                            if clean_time.endswith('Z'):
+                                clean_time = clean_time[:-1]
+                            dt = datetime.fromisoformat(clean_time)
+                            if dt.tzinfo is None:
+                                dt = dt.replace(tzinfo=timezone.utc)
                             t_ms = int(dt.timestamp() * 1000)
                         except Exception:
                             pass

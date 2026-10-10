@@ -130,6 +130,10 @@ def publish_location_attributes(client, location):
             ts = float(loc_time)
             if ts > 1e11:  # Epoch in milliseconds
                 ts = ts / 1000.0
+            now_ts = time.time()
+            if ts > now_ts + 30:
+                logger.warning(f"Location timestamp is in the future ({ts} > {now_ts}), clamping to current time.")
+                ts = now_ts
             recorded_at = datetime.fromtimestamp(ts, tz=timezone.utc).isoformat()
         except Exception:
             pass
