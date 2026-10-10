@@ -5,6 +5,7 @@ import json
 from comma_auth import CommaAuth
 import os
 import time
+import math
 from datetime import datetime, timezone
 from dotenv import load_dotenv, dotenv_values
 
@@ -148,18 +149,37 @@ def save_location_cache(loc_data):
         logger.debug(f"Could not save location cache: {e}")
 
 def load_location_cache():
+    global _last_known_battery_voltage, _last_known_bearing
     try:
         cache_file = get_location_cache_file()
         if os.path.isfile(cache_file):
             with open(cache_file, 'r') as f:
                 data = json.load(f)
                 if data and data.get('lat') is not None and data.get('lng') is not None:
+                    if data.get('battery_voltage') is not None and _last_known_battery_voltage is None:
+                        _last_known_battery_voltage = data.get('battery_voltage')
+                    if data.get('bearing') is not None and _last_known_bearing is None:
+                        _last_known_bearing = data.get('bearing')
                     return data
     except Exception as e:
         logger.debug(f"Could not load location cache: {e}")
     return None
 
 _last_known_battery_voltage = None
+_last_known_bearing = None
+
+
+def calculate_bearing(lat1, lon1, lat2, lon2):
+    """Calculates the compass heading (0-360 deg) between two coordinates."""
+    try:
+        phi1, lam1, phi2, lam2 = map(math.radians, [float(lat1), float(lon1), float(lat2), float(lon2)])
+        dlon = lam2 - lam1
+        x = math.sin(dlon) * math.cos(phi2)
+        y = math.cos(phi1) * math.sin(phi2) - (math.sin(phi1) * math.cos(phi2) * math.cos(dlon))
+        compass_bearing = (math.degrees(math.atan2(x, y)) + 360) % 360
+        return round(compass_bearing, 1)
+    except Exception:
+        return 0
 
 
 def get_device_location(dongle_id=None):
@@ -175,7 +195,7 @@ def get_device_location(dongle_id=None):
     3. If standby (ignition=False) or powered off:
        - Uses Comma Connect cloud /routes endpoint for parked position (no direct device GPS query).
     """
-    global _last_known_battery_voltage
+    global _last_known_battery_voltage, _last_known_bearing
     dev_id = dongle_id or DONGLE_ID
     if not dev_id or dev_id == 'your_dongle_id_here':
         logger.error("COMMA_DONGLE_ID not set.")
@@ -266,11 +286,14 @@ def get_device_location(dongle_id=None):
                     lng = gps.get('longitude')
                     if lat is not None and lng is not None and (lat != 0 or lng != 0):
                         logger.debug(f"Retrieved live GPS via Athena RPC: {lat}, {lng}")
+                        b_deg = gps.get('bearingDeg', 0)
+                        if b_deg and b_deg != 0:
+                            _last_known_bearing = round(float(b_deg), 1)
                         loc_res = {
                             'lat': float(lat),
                             'lng': float(lng),
                             'speed': gps.get('speed', 0),
-                            'bearing': gps.get('bearingDeg', 0),
+                            'bearing': _last_known_bearing if _last_known_bearing is not None else 0,
                             'altitude': gps.get('altitude', 0),
                             'accuracy': gps.get('horizontalAccuracy', 0),
                             'time': gps.get('unixTimestampMillis', int(time.time() * 1000)),
@@ -312,11 +335,19 @@ def get_device_location(dongle_id=None):
                         except Exception:
                             pass
                     logger.debug(f"Retrieved GPS from route '{route.get('fullname', 'unknown')}' (parked): {lat}, {lng}")
+
+                    parked_bearing = _last_known_bearing
+                    s_lat = route.get('start_lat')
+                    s_lng = route.get('start_lng')
+                    if parked_bearing is None and s_lat and s_lng and (s_lat != lat or s_lng != lng):
+                        parked_bearing = calculate_bearing(s_lat, s_lng, lat, lng)
+                        _last_known_bearing = parked_bearing
+
                     loc_res = {
                         'lat': float(lat),
                         'lng': float(lng),
                         'speed': 0,
-                        'bearing': 0,
+                        'bearing': parked_bearing if parked_bearing is not None else 0,
                         'altitude': 0,
                         'accuracy': 15,
                         'time': t_ms,
@@ -365,6 +396,8 @@ def get_device_location(dongle_id=None):
         cached_res['ignition'] = ignition
         if battery_voltage is not None:
             cached_res['battery_voltage'] = battery_voltage
+        if _last_known_bearing is not None:
+            cached_res['bearing'] = _last_known_bearing
         return cached_res
 
     logger.debug("No location data could be retrieved from any source.")
