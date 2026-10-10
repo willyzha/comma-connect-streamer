@@ -282,7 +282,7 @@ def publish_discovery(client):
     }
     client.publish(source_config_topic, json.dumps(source_payload), retain=True)
 
-    # 4. Compass Bearing Diagnostic Sensor
+    # 4. Compass Bearing Sensor
     bearing_config_topic = f"{MQTT_DISCOVERY_PREFIX}/sensor/{device_id}_bearing/config"
     bearing_payload = {
         "name": "Bearing",
@@ -293,14 +293,13 @@ def publish_discovery(client):
         "value_template": "{{ value_json.bearing | round(0) if value_json.bearing is not none else 0 }}",
         "unit_of_measurement": "°",
         "icon": "mdi:compass",
-        "entity_category": "diagnostic",
         "availability_topic": status_topic,
         "payload_available": "online",
         "payload_not_available": "offline"
     }
     client.publish(bearing_config_topic, json.dumps(bearing_payload), retain=True)
 
-    # 5. Address Diagnostic Sensor
+    # 5. Address Sensor
     if ENABLE_REVERSE_GEOCODE:
         address_config_topic = f"{MQTT_DISCOVERY_PREFIX}/sensor/{device_id}_address/config"
         address_payload = {
@@ -311,7 +310,6 @@ def publish_discovery(client):
             "state_topic": attr_topic,
             "value_template": "{{ value_json.address if value_json.address is not none else 'Unknown' }}",
             "icon": "mdi:map-marker",
-            "entity_category": "diagnostic",
             "availability_topic": status_topic,
             "payload_available": "online",
             "payload_not_available": "offline"
@@ -348,7 +346,6 @@ def publish_discovery(client):
         "value_template": "{{ value_json.recorded_at if value_json.recorded_at is not none else value_json.last_updated }}",
         "device_class": "timestamp",
         "icon": "mdi:clock-check-outline",
-        "entity_category": "diagnostic",
         "availability_topic": status_topic,
         "payload_available": "online",
         "payload_not_available": "offline"
@@ -403,7 +400,6 @@ def publish_discovery(client):
         "state_topic": attr_topic,
         "value_template": "{{ value_json.device_state if value_json.device_state is not none else 'powered_off' }}",
         "icon": "mdi:timer-sand",
-        "entity_category": "diagnostic",
         "availability_topic": status_topic,
         "payload_available": "online",
         "payload_not_available": "offline"

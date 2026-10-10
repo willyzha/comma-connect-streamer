@@ -216,39 +216,49 @@ def get_device_location(dongle_id=None):
     # Only communicate with the physical Comma device if Comma Connect reports it has pinged recently (<= 120s)
     if ping_age <= 120:
         device_power = True
+        athena_url = f"https://athena.comma.ai/{dev_id}"
         try:
-            # Single lightweight Athena RPC call to fetch panda telemetry (battery voltage and ignition)
-            athena_url = f"https://athena.comma.ai/{dev_id}"
-            athena_payload = {
-                "method": "getMessage",
-                "params": {"service": "pandaStates", "timeout": 1500},
-                "jsonrpc": "2.0",
-                "id": 0
-            }
+            # Query Athena deviceState for the master openpilot onroad/driving status
             resp = api_session.post(
                 athena_url,
                 headers={'Authorization': auth.token, 'Content-Type': 'application/json'},
-                json=athena_payload,
+                json={'method': 'getMessage', 'params': {'service': 'deviceState', 'timeout': 1000}, 'jsonrpc': '2.0', 'id': 0},
                 timeout=3
             )
             if resp.status_code == 200:
-                ps = resp.json().get('result', {}).get('pandaStates', [])
-                if ps and isinstance(ps, list) and len(ps) > 0:
-                    p0 = ps[0]
-                    raw_v = p0.get('voltage')
-                    if raw_v is not None and raw_v > 0:
-                        battery_voltage = round(raw_v / 1000.0, 2)
-                        _last_known_battery_voltage = battery_voltage
-                    ignition = bool(p0.get('ignitionLine') or p0.get('ignitionCan'))
-
-                device_state = 'driving' if ignition else 'standby'
+                ds = resp.json().get('result', {}).get('deviceState', {})
+                started = ds.get('started', False)
+                ignition = bool(started)
+                device_state = 'driving' if started else 'standby'
             else:
                 device_power = False
                 device_state = 'powered_off'
         except Exception as e:
-            logger.debug(f"Athena pandaStates attempt failed: {e}")
+            logger.debug(f"Athena deviceState attempt failed: {e}")
             device_power = False
             device_state = 'powered_off'
+
+        # Fetch 12V car battery voltage from pandaStates if device is awake
+        if device_power:
+            try:
+                p_resp = api_session.post(
+                    athena_url,
+                    headers={'Authorization': auth.token, 'Content-Type': 'application/json'},
+                    json={'method': 'getMessage', 'params': {'service': 'pandaStates', 'timeout': 1000}, 'jsonrpc': '2.0', 'id': 0},
+                    timeout=3
+                )
+                if p_resp.status_code == 200:
+                    ps = p_resp.json().get('result', {}).get('pandaStates', [])
+                    if ps and isinstance(ps, list) and len(ps) > 0:
+                        raw_v = ps[0].get('voltage')
+                        if raw_v is not None and raw_v > 0:
+                            battery_voltage = round(raw_v / 1000.0, 2)
+                            _last_known_battery_voltage = battery_voltage
+                        if ps[0].get('ignitionLine') or ps[0].get('ignitionCan'):
+                            ignition = True
+                            device_state = 'driving'
+            except Exception as e:
+                logger.debug(f"Athena pandaStates attempt failed: {e}")
 
     # If vehicle is confirmed driving and Comma Prime is active, check Comma Connect cloud location
     if device_state == 'driving' and device_info and device_info.get('prime') is True:
